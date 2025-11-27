@@ -15,6 +15,7 @@ using System.Data.Common;
 using System.Linq;
 using NHibernate.Cache;
 using NHibernate.Engine;
+using NHibernate.Loader;
 using NHibernate.SqlCommand;
 using NHibernate.Type;
 using NHibernate.Util;
@@ -23,7 +24,7 @@ namespace NHibernate.Multi
 {
 	using System.Threading.Tasks;
 	using System.Threading;
-	public abstract partial class QueryBatchItemBase<TResult> : IQueryBatchItem<TResult>
+	public abstract partial class QueryBatchItemBase<TResult> : IQueryBatchItem<TResult>, IQueryBatchItemWithAsyncProcessResults
 	{
 
 		/// <inheritdoc />
@@ -34,6 +35,7 @@ namespace NHibernate.Multi
 
 			var dialect = Session.Factory.Dialect;
 			var hydratedObjects = new List<object>[_queryInfos.Count];
+			var isDebugLog = Log.IsDebugEnabled();
 
 			using (Session.SwitchCacheMode(_cacheMode))
 			{
@@ -41,7 +43,7 @@ namespace NHibernate.Multi
 				for (var i = 0; i < _queryInfos.Count; i++)
 				{
 					var queryInfo = _queryInfos[i];
-					var loader = queryInfo.Loader;
+					var loader = queryInfo.QueryLoader;
 					var queryParameters = queryInfo.Parameters;
 
 					//Skip processing for items already loaded from cache
@@ -75,9 +77,21 @@ namespace NHibernate.Multi
 					var lockModeArray = loader.GetLockModes(queryParameters.LockModes);
 					var optionalObjectKey = Loader.Loader.GetOptionalObjectKey(queryParameters, Session);
 					var tmpResults = new List<object>();
+					var queryCacheBuilder = queryInfo.IsCacheable ? new QueryCacheResultBuilder(loader) : null;
+					var cacheBatcher = queryInfo.CacheBatcher;
+					var ownCacheBatcher = cacheBatcher == null;
+					if (ownCacheBatcher)
+						cacheBatcher = new CacheBatcher(Session);
 
-					for (var count = 0; count < maxRows && await (reader.ReadAsync(cancellationToken)).ConfigureAwait(false); count++)
+					if (isDebugLog)
+						Log.Debug("processing result set");
+
+					int count;
+					for (count = 0; count < maxRows && await (reader.ReadAsync(cancellationToken)).ConfigureAwait(false); count++)
 					{
+						if (isDebugLog)
+							Log.Debug("result set row: {0}", count);
+
 						rowCount++;
 
 						var o =
@@ -90,7 +104,9 @@ namespace NHibernate.Multi
 								hydratedObjects[i],
 								keys,
 								true,
-								forcedResultTransformer
+								forcedResultTransformer,
+								queryCacheBuilder,
+								(persister, data) => cacheBatcher.AddToBatch(persister, data)
 , cancellationToken							)).ConfigureAwait(false);
 						if (loader.IsSubselectLoadingEnabled)
 						{
@@ -101,17 +117,58 @@ namespace NHibernate.Multi
 						tmpResults.Add(o);
 					}
 
+					if (isDebugLog)
+						Log.Debug("done processing result set ({0} rows)", count);
+
 					queryInfo.Result = tmpResults;
 					if (queryInfo.CanPutToCache)
-						queryInfo.ResultToCache = tmpResults;
+						queryInfo.ResultToCache = queryCacheBuilder.Result;
+
+					if (ownCacheBatcher)
+						await (cacheBatcher.ExecuteBatchAsync(cancellationToken)).ConfigureAwait(false);
 
 					await (reader.NextResultAsync(cancellationToken)).ConfigureAwait(false);
 				}
 
-				await (InitializeEntitiesAndCollectionsAsync(reader, hydratedObjects, cancellationToken)).ConfigureAwait(false);
-
+				StopLoadingCollections(reader);
+				_reader = reader;
+				_hydratedObjects = hydratedObjects;
 				return rowCount;
 			}
+		}
+
+		/// <inheritdoc cref="IQueryBatchItem.ProcessResults" />
+		public async Task ProcessResultsAsync(CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			ThrowIfNotInitialized();
+
+			using (Session.SwitchCacheMode(_cacheMode))
+				await (InitializeEntitiesAndCollectionsAsync(_reader, _hydratedObjects, cancellationToken)).ConfigureAwait(false);
+
+			for (var i = 0; i < _queryInfos.Count; i++)
+			{
+				var queryInfo = _queryInfos[i];
+				if (_subselectResultKeys[i] != null)
+				{
+					queryInfo.QueryLoader.CreateSubselects(_subselectResultKeys[i], queryInfo.Parameters, Session);
+				}
+
+				if (queryInfo.IsCacheable)
+				{
+					if (queryInfo.IsResultFromCache)
+					{
+						var queryCacheBuilder = new QueryCacheResultBuilder(queryInfo.QueryLoader);
+						queryInfo.Result = queryCacheBuilder.GetResultList(queryInfo.Result);
+					}
+
+					// This transformation must not be applied to ResultToCache.
+					queryInfo.Result =
+						queryInfo.QueryLoader.TransformCacheableResults(
+							queryInfo.Parameters, queryInfo.CacheKey.ResultTransformer, queryInfo.Result);
+				}
+			}
+			AfterLoadCallback?.Invoke(GetResults());
 		}
 
 		/// <inheritdoc />
@@ -132,7 +189,7 @@ namespace NHibernate.Multi
 				var queryInfo = _queryInfos[i];
 				if (queryInfo.IsResultFromCache)
 					continue;
-				await (queryInfo.Loader.InitializeEntitiesAndCollectionsAsync(
+				await (queryInfo.QueryLoader.InitializeEntitiesAndCollectionsAsync(
 					hydratedObjects[i], reader, Session, queryInfo.Parameters.IsReadOnly(Session),
 					queryInfo.CacheBatcher, cancellationToken)).ConfigureAwait(false);
 			}

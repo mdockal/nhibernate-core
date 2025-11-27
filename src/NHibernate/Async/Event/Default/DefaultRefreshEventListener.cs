@@ -14,6 +14,7 @@ using System.Collections;
 using NHibernate.Cache;
 using NHibernate.Engine;
 using NHibernate.Impl;
+using NHibernate.Intercept;
 using NHibernate.Persister.Entity;
 using NHibernate.Type;
 using NHibernate.Util;
@@ -68,7 +69,7 @@ namespace NHibernate.Event.Default
 
 			if (e == null)
 			{
-				persister = source.GetEntityPersister(null, obj); //refresh() does not pass an entityName
+				persister = source.GetEntityPersister(source.BestGuessEntityName(obj), obj); //refresh() does not pass an entityName
 				id = persister.GetIdentifier(obj);
 				if (log.IsDebugEnabled())
 				{
@@ -115,7 +116,9 @@ namespace NHibernate.Event.Default
 			}
 
 			await (EvictCachedCollectionsAsync(persister, id, source.Factory, cancellationToken)).ConfigureAwait(false);
-
+			
+			RefreshLazyProperties(persister, obj);
+			
 			// NH Different behavior : NH-1601
 			// At this point the entity need the real refresh, all elementes of collections are Refreshed,
 			// the collection state was evicted, but the PersistentCollection (in the entity state)
@@ -130,8 +133,7 @@ namespace NHibernate.Event.Default
 				if (!persister.IsMutable)
 					source.SetReadOnly(result, true);
 				else
-					source.SetReadOnly(result, (e == null ? source.DefaultReadOnly : e.IsReadOnly));
-			
+					source.SetReadOnly(result, e == null ? source.DefaultReadOnly : !e.IsModifiableEntity());
 			source.FetchProfile = previousFetchProfile;
 
 			// NH Different behavior : we are ignoring transient entities without throw any kind of exception

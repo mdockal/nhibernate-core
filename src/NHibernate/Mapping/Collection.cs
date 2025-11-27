@@ -75,7 +75,6 @@ namespace NHibernate.Mapping
 		private readonly HashSet<string> synchronizedTables = new HashSet<string>();
 		private IDictionary<string, string> typeParameters;
 
-
 		protected Collection(PersistentClass owner)
 		{
 			this.owner = owner;
@@ -594,6 +593,8 @@ namespace NHibernate.Mapping
 			get { return false; }
 		}
 
+		// Since v5.6
+		[Obsolete("This method is not used and will be removed in a future version")]
 		public void SetTypeUsingReflection(string className, string propertyName, string access)
 		{
 		}

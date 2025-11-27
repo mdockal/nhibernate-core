@@ -12,6 +12,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
+using NHibernate.Driver;
 using NHibernate.Engine;
 using NHibernate.Impl;
 
@@ -104,7 +105,7 @@ namespace NHibernate.Transaction
 		public async Task RollbackAsync(CancellationToken cancellationToken = default(CancellationToken))
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			using (new SessionIdLoggingContext(sessionId))
+			using (SessionIdLoggingContext.CreateOrNull(sessionId))
 			{
 				CheckNotDisposed();
 				CheckBegun();
@@ -156,37 +157,47 @@ namespace NHibernate.Transaction
 		protected virtual async Task DisposeAsync(bool isDisposing, CancellationToken cancellationToken)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			using (new SessionIdLoggingContext(sessionId))
+			using (SessionIdLoggingContext.CreateOrNull(sessionId))
 			{
 				if (_isAlreadyDisposed)
 				{
 					// don't dispose of multiple times.
 					return;
 				}
+				_isAlreadyDisposed = true;
 
 				// free managed resources that are being managed by the AdoTransaction if we
 				// know this call came through Dispose()
 				if (isDisposing)
 				{
-					if (trans != null)
+					try
 					{
-						trans.Dispose();
-						trans = null;
-						log.Debug("DbTransaction disposed.");
-					}
+						if (trans != null)
+						{
+							trans.Dispose();
+							trans = null;
+							log.Debug("DbTransaction disposed.");
+						}
 
-					if (IsActive && session != null)
+						if (IsActive)
+						{
+							// Assume we are rolled back
+							rolledBack = true;
+							if (session != null)
+								await (AfterTransactionCompletionAsync(false, cancellationToken)).ConfigureAwait(false);
+						}
+						// nothing for Finalizer to do - so tell the GC to ignore it
+						GC.SuppressFinalize(this);
+					}
+					finally
 					{
-						// Assume we are rolled back
-						await (AfterTransactionCompletionAsync(false, cancellationToken)).ConfigureAwait(false);
+						// Do not leave the object in an inconsistent state in case of disposal failure: we should assume
+						// the DbTransaction is either no more ongoing or unrecoverable.
+						begun = false;
 					}
 				}
 
 				// free unmanaged resources here
-
-				_isAlreadyDisposed = true;
-				// nothing for Finalizer to do - so tell the GC to ignore it
-				GC.SuppressFinalize(this);
 			}
 		}
 

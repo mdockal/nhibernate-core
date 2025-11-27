@@ -153,12 +153,10 @@ namespace NHibernate.Cfg.XmlHbmBinding
 			{
 				return ClassForNameChecked(idSchema.@class, mappings, "could not find class: {0}");
 			}
-
 			else if (containingType == null)
 			{
 				return null;
 			}
-
 			else
 			{
 				string access = idSchema.access ?? mappings.DefaultAccess;
@@ -192,7 +190,7 @@ namespace NHibernate.Cfg.XmlHbmBinding
 		{
 			if (parentClass != null && value.IsSimpleValue)
 			{
-				value.SetTypeUsingReflection(parentClass.AssemblyQualifiedName, propertyName,
+				value.SetTypeUsingReflection(parentClass, propertyName,
 				                             keyManyToOneSchema.access ?? mappings.DefaultAccess);
 			}
 
@@ -244,7 +242,7 @@ namespace NHibernate.Cfg.XmlHbmBinding
 		{
 			if (parentClass != null && value.IsSimpleValue)
 			{
-				value.SetTypeUsingReflection(parentClass.AssemblyQualifiedName, propertyName,
+				value.SetTypeUsingReflection(parentClass, propertyName,
 				                             keyPropertySchema.access ?? mappings.DefaultAccess);
 			}
 

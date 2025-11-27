@@ -1,16 +1,9 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-
 using NHibernate.Engine;
 using NHibernate.Hql.Ast.ANTLR.Tree;
-using NHibernate.Impl;
-using NHibernate.Param;
 using NHibernate.SqlCommand;
-using NHibernate.Type;
-using NHibernate.Util;
 
 namespace NHibernate.Hql.Ast.ANTLR.Util
 {
@@ -56,16 +49,25 @@ namespace NHibernate.Hql.Ast.ANTLR.Util
 					return JoinType.RightOuterJoin;
 				case HqlSqlWalker.FULL:
 					return JoinType.FullJoin;
+				case HqlSqlWalker.CROSS:
+					return JoinType.CrossJoin;
 				default:
 					throw new AssertionFailure("undefined join type " + astJoinType);
 			}
 		}
 
-		public void ProcessJoins(QueryNode query) 
+		// Since v5.3
+		[Obsolete("Use ProcessJoins taking an IRestrictableStatement instead")]
+		public void ProcessJoins(QueryNode query)
+		{
+			IRestrictableStatement rs = query;
+			ProcessJoins(rs);
+		}
+
+		public void ProcessJoins(IRestrictableStatement query) 
 		{
 			FromClause fromClause = query.FromClause;
-
-			IList<IASTNode> fromElements;
+			IList<FromElement> fromElements;
 			if ( DotNode.UseThetaStyleImplicitJoins ) 
 			{
 				// for regression testing against output from the old parser...
@@ -74,62 +76,94 @@ namespace NHibernate.Hql.Ast.ANTLR.Util
 				// expected by the old parser; this is definitely another of those "only needed
 				// for regression purposes".  The SyntheticAndFactory, then, simply injects them as it
 				// encounters them.
-				fromElements = new List<IASTNode>();
-				IList<IASTNode> t = fromClause.GetFromElements();
+				fromElements = new List<FromElement>();
+				var t = fromClause.GetFromElementsTyped();
 
 				for (int i = t.Count - 1; i >= 0; i--)
 				{
 					fromElements.Add(t[i]);
 				}
 			}
-			else 
+			else
 			{
-				fromElements = fromClause.GetFromElements();
+				fromElements = fromClause.GetFromElementsTyped();
+
+				for (var index = fromElements.Count - 1; index >= 0; index--)
+				{
+					var fromElement = fromElements[index];
+					// We found an implied from element that is used in the WITH clause of another from element, so it need to become part of it's join sequence
+					if (fromElement.IsImplied && fromElement.IsPartOfJoinSequence == null)
+					{
+						var origin = fromElement.Origin;
+						while(origin.IsImplied)
+						{
+							origin = origin.Origin;
+							origin.IsPartOfJoinSequence = false;
+						}
+
+						if (origin.WithClauseFragment?.Contains(fromElement.TableAlias + ".") == true)
+						{
+							List<FromElement> elements = new List<FromElement>();
+							while(fromElement.IsImplied)
+							{
+								elements.Add(fromElement);
+								// This from element will be rendered as part of the origins join sequence
+								fromElement.Text = string.Empty;
+								fromElement.IsPartOfJoinSequence = true;
+								fromElement = fromElement.Origin;
+							}
+
+							for (var i = elements.Count - 1; i >= 0; i--)
+							{
+								origin.JoinSequence.AddJoin(elements[i]);
+							}
+						}
+					}
+				}
 			}
 
 			// Iterate through the alias,JoinSequence pairs and generate SQL token nodes.
 			foreach (FromElement fromElement in fromElements)
 			{
+				if(fromElement.IsPartOfJoinSequence == true)
+					continue;
+
 				JoinSequence join = fromElement.JoinSequence;
 
 				join.SetSelector(new JoinSequenceSelector(_walker, fromClause, fromElement));
 
-				AddJoinNodes( query, join, fromElement );
+				// the delete and update statements created here will never be executed when IsMultiTable is true,
+				// only the where clause will be used by MultiTableUpdateExecutor/MultiTableDeleteExecutor. In that case
+				// we have to use the alias from the persister.
+				AddJoinNodes( query, join, fromElement);
 			}
 		}
 
-		private void AddJoinNodes(QueryNode query, JoinSequence join, FromElement fromElement) 
+		private void AddJoinNodes(IRestrictableStatement query, JoinSequence join, FromElement fromElement)
 		{
 			JoinFragment joinFragment = join.ToJoinFragment(
 					_walker.EnabledFilters,
 					fromElement.UseFromFragment || fromElement.IsDereferencedBySuperclassOrSubclassProperty,
-					fromElement.WithClauseFragment,
-					fromElement.WithClauseJoinAlias
+					fromElement.WithClauseFragment
 			);
 
 			SqlString frag = joinFragment.ToFromFragmentString;
 			SqlString whereFrag = joinFragment.ToWhereFragmentString;
 
-			// If the from element represents a JOIN_FRAGMENT and it is
-			// a theta-style join, convert its type from JOIN_FRAGMENT
-			// to FROM_FRAGMENT
-			if ( fromElement.Type == HqlSqlWalker.JOIN_FRAGMENT &&
-					( join.IsThetaStyle || SqlStringHelper.IsNotEmpty( whereFrag ) ) ) 
+			// If the from element represents a JOIN_FRAGMENT or ENTITY_JOIN and it is
+			// a theta-style join, convert its type to FROM_FRAGMENT.
+			if ((fromElement.Type == HqlSqlWalker.JOIN_FRAGMENT || fromElement.Type == HqlSqlWalker.ENTITY_JOIN) &&
+					(join.IsThetaStyle || SqlStringHelper.IsNotEmpty(whereFrag))) 
 			{
 				fromElement.Type = HqlSqlWalker.FROM_FRAGMENT;
-				fromElement.JoinSequence.SetUseThetaStyle( true ); // this is used during SqlGenerator processing
+				// This is used during SqlGenerator processing.
+				fromElement.JoinSequence.SetUseThetaStyle(true);
 			}
 
 			// If there is a FROM fragment and the FROM element is an explicit, then add the from part.
 			if ( fromElement.UseFromFragment /*&& StringHelper.isNotEmpty( frag )*/ ) 
 			{
-				SqlString fromFragment = ProcessFromFragment( frag, join ).Trim();
-				if ( log.IsDebugEnabled() ) 
-				{
-					log.Debug("Using FROM fragment [{0}]", fromFragment);
-				}
-
-				ProcessDynamicFilterParameters(fromFragment,fromElement,_walker);
+				ProcessDynamicFilterParameters(frag, fromElement, _walker, true);
 			}
 
 			_syntheticAndFactory.AddWhereFragment( 
@@ -141,7 +175,7 @@ namespace NHibernate.Hql.Ast.ANTLR.Util
 			);
 		}
 
-		private static SqlString ProcessFromFragment(SqlString frag, JoinSequence join) 
+		private static SqlString ProcessFromFragment(SqlString frag) 
 		{
 			SqlString fromFragment = frag.Trim();
 			// The FROM fragment will probably begin with ', '.  Remove this if it is present.
@@ -154,7 +188,12 @@ namespace NHibernate.Hql.Ast.ANTLR.Util
 		public static void ProcessDynamicFilterParameters(
 				SqlString sqlFragment,
 				IParameterContainer container,
-				HqlSqlWalker walker) 
+				HqlSqlWalker walker)
+		{
+			ProcessDynamicFilterParameters(sqlFragment, container, walker, false);
+		}
+
+		private static void ProcessDynamicFilterParameters(SqlString sqlFragment, IParameterContainer container, HqlSqlWalker walker, bool fromFragment)
 		{
 			if ( walker.EnabledFilters.Count == 0
 					&& ( ! HasDynamicFilterParam( sqlFragment ) )
@@ -163,6 +202,14 @@ namespace NHibernate.Hql.Ast.ANTLR.Util
 				return;
 			}
 
+			if (fromFragment)
+			{
+				sqlFragment = ProcessFromFragment(sqlFragment).Trim();
+				if (log.IsDebugEnabled())
+				{
+					log.Debug("Using FROM fragment [{0}]", sqlFragment);
+				}
+			}
 			container.Text = sqlFragment.ToString(); // dynamic-filters are processed altogether by Loader
 		}
 
@@ -205,7 +252,7 @@ namespace NHibernate.Hql.Ast.ANTLR.Util
 				}
 				bool shallowQuery = _walker.IsShallowQuery;
 				bool includeSubclasses = _fromElement.IncludeSubclasses;
-				bool subQuery = _fromClause.IsSubQuery;
+				bool subQuery = _fromClause.IsScalarSubQuery;
 				return includeSubclasses && containsTableAlias && !subQuery && !shallowQuery;
 			}
 		}

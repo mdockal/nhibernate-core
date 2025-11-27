@@ -13,12 +13,11 @@ using System.Linq;
 using System.Threading;
 using System.Transactions;
 using log4net;
-using log4net.Repository.Hierarchy;
 using NHibernate.Cfg;
 using NHibernate.Engine;
-using NHibernate.Linq;
 using NHibernate.Test.TransactionTest;
 using NUnit.Framework;
+using NHibernate.Linq;
 
 namespace NHibernate.Test.SystemTransactions
 {
@@ -529,10 +528,11 @@ namespace NHibernate.Test.SystemTransactions
 				}
 				var count = 0;
 				Assert.DoesNotThrowAsync(async () => count = await (s.Query<Person>().CountAsync()), "Failed using the session after scope.");
-				if (count != 1)
+				const int expectedCount = 1;
+				if (count != expectedCount)
 					// We are not testing that here, so just issue a warning. Do not use DodgeTransactionCompletionDelayIfRequired
 					// before previous assert. We want to ascertain the session is usable in any cases.
-					Assert.Warn("Unexpected entity count: {0} instead of {1}. The transaction seems to have a delayed commit.", count, 1);
+					Assert.Warn($"Unexpected entity count: {count} instead of {expectedCount}. The transaction seems to have a delayed commit.");
 			}
 		}
 
@@ -690,16 +690,9 @@ namespace NHibernate.Test.SystemTransactions
 
 		private Task DodgeTransactionCompletionDelayIfRequiredAsync(CancellationToken cancellationToken = default(CancellationToken))
 		{
-			try
-			{
-				if (Sfi.ConnectionProvider.Driver.HasDelayedDistributedTransactionCompletion)
-					return Task.Delay(500, cancellationToken);
-				return Task.CompletedTask;
-			}
-			catch (Exception ex)
-			{
-				return Task.FromException<object>(ex);
-			}
+			if (Sfi.ConnectionProvider.Driver.HasDelayedDistributedTransactionCompletion)
+				return Task.Delay(500, cancellationToken);
+			return Task.CompletedTask;
 		}
 
 		private void DodgeTransactionCompletionDelayIfRequired()

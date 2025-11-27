@@ -36,6 +36,18 @@ namespace NHibernate.Test.Linq
 		}
 
 		[Test]
+		public async Task CanExecuteContainsAsync()
+		{
+			var user = await (db.Users.FirstOrDefaultAsync());
+			var result = db.Users.Contains(user);
+			Assert.That(result, Is.True);
+
+			user = new User("test", DateTime.Now);
+			result = db.Users.Contains(user);
+			Assert.That(result, Is.False);
+		}
+
+		[Test]
 		public async Task CanExecuteCountWithOrderByArgumentsAsync()
 		{
 			var query = db.Users.OrderBy(u => u.Name);
@@ -47,6 +59,7 @@ namespace NHibernate.Test.Linq
 		public async Task CanSelectPropertiesIntoObjectArrayAsync()
 		{
 			var result = await (db.Users
+				.OrderBy(u => u.Id)
 				.Select(u => new object[] {u.Id, u.Name, u.InvalidLoginAttempts})
 				.FirstAsync());
 
@@ -59,6 +72,7 @@ namespace NHibernate.Test.Linq
 		public async Task CanSelectComponentsIntoObjectArrayAsync()
 		{
 			var result = await (db.Users
+				.OrderBy(u => u.Id)
 				.Select(u => new object[] {u.Component, u.Component.OtherComponent})
 				.FirstAsync());
 
@@ -94,6 +108,7 @@ namespace NHibernate.Test.Linq
 			const string name = "Julian";
 
 			var result = await (db.Users
+				.OrderBy(u => u.Id)
 				.Select(u => new object[] {u.Id, pi, name, DateTime.MinValue})
 				.FirstAsync());
 
@@ -107,6 +122,7 @@ namespace NHibernate.Test.Linq
 		public async Task CanSelectPropertiesFromAssociationsIntoObjectArrayAsync()
 		{
 			var result = await (db.Users
+				.OrderBy(u => u.Id)
 				.Select(u => new object[] {u.Id, u.Role.Name, u.Role.Entity.Output})
 				.FirstAsync());
 
@@ -119,6 +135,7 @@ namespace NHibernate.Test.Linq
 		public async Task CanSelectPropertiesIntoObjectArrayInPropertyAsync()
 		{
 			var result = await (db.Users
+				.OrderBy(u => u.Id)
 				.Select(u => new { Cells = new object[] { u.Id, u.Name, new object[u.Id] } })
 				.FirstAsync());
 
@@ -132,6 +149,7 @@ namespace NHibernate.Test.Linq
 		public async Task CanSelectPropertiesIntoPropertyListInPropertyAsync()
 		{
 			var result = await (db.Users
+				.OrderBy(u => u.Id)
 				.Select(u => new { Cells = new List<object> { u.Id, u.Name, new object[u.Id] } })
 				.FirstAsync());
 
@@ -144,7 +162,7 @@ namespace NHibernate.Test.Linq
 		[Test, Description("NH-2744")]
 		public async Task CanSelectPropertiesIntoNestedObjectArraysAsync()
 		{
-			var query = db.Users.Select(u => new object[] {"Root", new object[] {"Sub1", u.Name, new object[] {"Sub2", u.Name}}});
+			var query = db.Users.OrderBy(u => u.Id).Select(u => new object[] {"Root", new object[] {"Sub1", u.Name, new object[] {"Sub2", u.Name}}});
 			var result = await (query.FirstAsync());
 
 			Assert.That(result.Length, Is.EqualTo(2));

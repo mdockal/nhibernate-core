@@ -1,7 +1,6 @@
 using System;
-using System.Configuration;
-using System.IO;
-using System.Linq;
+using NHibernate.Cfg;
+using System.Runtime.CompilerServices;
 
 namespace NHibernate
 {
@@ -49,18 +48,39 @@ namespace NHibernate
 	/// </remarks>
 	public static class NHibernateLogger
 	{
-		private const string nhibernateLoggerConfKey = "nhibernate-logger";
 		private static INHibernateLoggerFactory _loggerFactory;
 
 #pragma warning disable 618
-		internal static ILoggerFactory LegacyLoggerFactory { get; private set; }
+		private static ILoggerFactory _legacyLoggerFactory;
+		internal static ILoggerFactory LegacyLoggerFactory => LogWrapper.LegacyLoggerFactory; 
 #pragma warning restore 618
 
-		static NHibernateLogger()
+		private static class LogWrapper
 		{
-			var nhibernateLoggerClass = GetNhibernateLoggerClass();
-			var loggerFactory = string.IsNullOrEmpty(nhibernateLoggerClass) ? null : GetLoggerFactory(nhibernateLoggerClass);
-			SetLoggersFactory(loggerFactory);
+			static LogWrapper()
+			{
+				var userLoggerFactory = _loggerFactory;
+				if (userLoggerFactory == null)
+				{
+					var nhibernateLoggerClass = GetNhibernateLoggerClass();
+					var loggerFactory = string.IsNullOrEmpty(nhibernateLoggerClass) ? null : GetLoggerFactory(nhibernateLoggerClass);
+					SetLoggersFactory(loggerFactory);
+				}
+			}
+
+			public static INHibernateLoggerFactory LoggerFactory
+			{
+				[MethodImpl(MethodImplOptions.NoInlining)]
+				get => _loggerFactory;
+			}
+
+#pragma warning disable 618
+			internal static ILoggerFactory LegacyLoggerFactory
+			{
+				[MethodImpl(MethodImplOptions.NoInlining)]
+				get => _legacyLoggerFactory;
+			}
+#pragma warning restore 618
 		}
 
 		/// <summary>
@@ -75,17 +95,17 @@ namespace NHibernate
 			// Also keep global state for obsolete logger
 			if (loggerFactory == null)
 			{
-				LegacyLoggerFactory = new NoLoggingLoggerFactory();
+				_legacyLoggerFactory = new NoLoggingLoggerFactory();
 			}
 			else
 			{
 				if (loggerFactory is LoggerProvider.LegacyLoggerFactoryAdaptor legacyAdaptor)
 				{
-					LegacyLoggerFactory = legacyAdaptor.Factory;
+					_legacyLoggerFactory = legacyAdaptor.Factory;
 				}
 				else
 				{
-					LegacyLoggerFactory = new LoggerProvider.ReverseLegacyLoggerFactoryAdaptor(loggerFactory);
+					_legacyLoggerFactory = new LoggerProvider.ReverseLegacyLoggerFactoryAdaptor(loggerFactory);
 				}
 			}
 #pragma warning restore 618
@@ -98,7 +118,7 @@ namespace NHibernate
 		/// <returns>A NHibernate logger.</returns>
 		public static INHibernateLogger For(string keyName)
 		{
-			return _loggerFactory.LoggerFor(keyName);
+			return LogWrapper.LoggerFactory.LoggerFor(keyName);
 		}
 
 		/// <summary>
@@ -108,29 +128,19 @@ namespace NHibernate
 		/// <returns>A NHibernate logger.</returns>
 		public static INHibernateLogger For(System.Type type)
 		{
-			return _loggerFactory.LoggerFor(type);
+			return LogWrapper.LoggerFactory.LoggerFor(type);
 		}
 
 		private static string GetNhibernateLoggerClass()
 		{
-			var nhibernateLogger = ConfigurationManager.AppSettings.Keys.Cast<string>().FirstOrDefault(k => nhibernateLoggerConfKey.Equals(k, StringComparison.OrdinalIgnoreCase));
-			string nhibernateLoggerClass = null;
-			if (string.IsNullOrEmpty(nhibernateLogger))
+			var nhibernateLoggerClass = ConfigurationProvider.Current.GetLoggerFactoryClassName();
+			if (nhibernateLoggerClass == null)
 			{
-				// look for log4net.dll
-				string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-				string relativeSearchPath = AppDomain.CurrentDomain.RelativeSearchPath;
-				string binPath = relativeSearchPath == null ? baseDir : Path.Combine(baseDir, relativeSearchPath);
-				string log4NetDllPath = binPath == null ? "log4net.dll" : Path.Combine(binPath, "log4net.dll");
-
-				if (File.Exists(log4NetDllPath) || AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "log4net"))
+				// look for log4net
+				if (Log4NetLoggerFactory.Log4NetAssembly != null)
 				{
 					nhibernateLoggerClass = typeof(Log4NetLoggerFactory).AssemblyQualifiedName;
 				}
-			}
-			else
-			{
-				nhibernateLoggerClass = ConfigurationManager.AppSettings[nhibernateLogger];
 			}
 			return nhibernateLoggerClass;
 		}

@@ -13,7 +13,6 @@ namespace NHibernate.Cache
 	{
 		private static readonly INHibernateLogger log = NHibernateLogger.For(typeof(ReadOnlyCache));
 
-		// 6.0 TODO: remove
 		private CacheBase _cache;
 
 		/// <summary>
@@ -30,10 +29,7 @@ namespace NHibernate.Cache
 #pragma warning restore 618
 		{
 			get { return _cache; }
-			set
-			{
-				_cache = value as CacheBase ?? new ObsoleteCacheWrapper(value);
-			}
+			set { _cache = value?.AsCacheBase(); }
 		}
 
 		// 6.0 TODO: make implicit and switch to auto-property
@@ -45,12 +41,13 @@ namespace NHibernate.Cache
 
 		public object Get(CacheKey key, long timestamp)
 		{
-			object result = Cache.Get(key);
-			if (result != null && log.IsDebugEnabled())
+			var result = Cache.Get(key);
+			if (log.IsDebugEnabled())
 			{
-				log.Debug("Cache hit: {0}", key);
+				log.Debug(result != null ? "Cache hit: {0}" : "Cache miss: {0}", key);
 			}
-			return result;	
+
+			return result;
 		}
 
 		public object[] GetMany(CacheKey[] keys, long timestamp)
@@ -59,15 +56,14 @@ namespace NHibernate.Cache
 			{
 				log.Debug("Cache lookup: {0}", string.Join(",", keys.AsEnumerable()));
 			}
-			var results = _cache.GetMany(keys.Select(o => (object) o).ToArray());
-			if (!log.IsDebugEnabled())
+
+			var results = _cache.GetMany(keys);
+			if (log.IsDebugEnabled())
 			{
-				return results;
+				log.Debug("Cache hit: {0}", string.Join(",", keys.Where((k, i) => results[i] != null)));
+				log.Debug("Cache miss: {0}", string.Join(",", keys.Where((k, i) => results[i] == null)));
 			}
-			for (var i = 0; i < keys.Length; i++)
-			{
-				log.Debug(results[i] != null ? $"Cache hit: {keys[i]}" : $"Cache miss: {keys[i]}");
-			}
+
 			return results;
 		}
 
@@ -104,7 +100,7 @@ namespace NHibernate.Cache
 			var skipKeyIndexes = new HashSet<int>();
 			if (checkKeys.Any())
 			{
-				var objects = _cache.GetMany(checkKeys.Select(o => (object) o).ToArray());
+				var objects = _cache.GetMany(checkKeys.ToArray());
 				for (var i = 0; i < objects.Length; i++)
 				{
 					if (objects[i] != null)
@@ -185,14 +181,9 @@ namespace NHibernate.Cache
 
 		public void Destroy()
 		{
-			try
-			{
-				Cache.Destroy();
-			}
-			catch (Exception e)
-			{
-				log.Warn(e, "Could not destroy cache");
-			}
+			// The cache is externally provided and may be shared. Destroying the cache is
+			// not the responsibility of this class.
+			Cache = null;
 		}
 
 		/// <summary>

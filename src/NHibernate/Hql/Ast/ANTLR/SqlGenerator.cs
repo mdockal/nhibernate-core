@@ -29,7 +29,7 @@ namespace NHibernate.Hql.Ast.ANTLR
 		 * This is because sql function templates need arguments as separate string chunks
 		 * that will be assembled into the target dialect-specific function call.
 		 */
-		private readonly List<ISqlWriter> outputStack = new List<ISqlWriter>();
+		private readonly Stack<ISqlWriter> outputStack = new Stack<ISqlWriter>();
 
 		/// <summary>
 		/// Handles parser errors.
@@ -128,10 +128,14 @@ namespace NHibernate.Hql.Ast.ANTLR
 			var parameterNode = n as ParameterNode;
 			if (parameterNode != null)
 			{
-				var parameter = Parameter.Placeholder;
-				// supposed to be simplevalue
-				parameter.BackTrack = parameterNode.HqlParameterSpecification.GetIdsForBackTrack(sessionFactory).Single();
-				writer.PushParameter(parameter);
+				var list = parameterNode.HqlParameterSpecification.GetIdsForBackTrack(sessionFactory).Select(
+					backTrack =>
+					{
+						var parameter = Parameter.Placeholder;
+						parameter.BackTrack = backTrack;
+						return parameter;
+					}).ToList();
+				Out(SqlStringHelper.ParametersList(list));
 			}
 			else if (n is SqlNode)
 			{
@@ -179,8 +183,7 @@ namespace NHibernate.Hql.Ast.ANTLR
 				return;
 			}
 
-			var left = (FromElement)a;
-			var right = (FromElement)next;
+			var right = (FromElement) next;
 
 			///////////////////////////////////////////////////////////////////////
 			// HACK ALERT !!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -196,33 +199,17 @@ namespace NHibernate.Hql.Ast.ANTLR
 				right = (FromElement)right.NextSibling;
 			}
 
-			if (right == null)
-			{
-				return;
-			}
-			///////////////////////////////////////////////////////////////////////
-
-			if (!HasText(right))
+			if (right == null || !HasText(right))
 			{
 				return;
 			}
 
-			if (right.RealOrigin == left || (right.RealOrigin != null && right.RealOrigin == left.RealOrigin))
+			if (right.Type == JOIN_SUBQUERY || (right.JoinSequence?.IsThetaStyle == false && right.JoinSequence.JoinCount != 0))
 			{
-				// right represents a joins originating from left; or
-				// both right and left reprersent joins originating from the same FromElement
-				if (right.JoinSequence != null && right.JoinSequence.IsThetaStyle)
-				{
-					Out(", ");
-				}
-				else
-				{
-					Out(" ");
-				}
+				Out(" ");
 			}
 			else
 			{
-				// these are just two unrelated table references
 				Out(", ");
 			}
 		}
@@ -280,7 +267,7 @@ namespace NHibernate.Hql.Ast.ANTLR
 			else
 			{
 				// this function has a template -> redirect output and catch the arguments
-				outputStack.Insert(0, writer);
+				outputStack.Push(writer);
 				writer = new FunctionArguments();
 			}
 		}
@@ -297,10 +284,15 @@ namespace NHibernate.Hql.Ast.ANTLR
 			{
 				// this function has a template -> restore output, apply the template and write the result out
 				var functionArguments = (FunctionArguments)writer; // TODO: Downcast to avoid using an interface?  Yuck.
-				writer = outputStack[0];
-				outputStack.RemoveAt(0);
-				Out(template.Render(functionArguments.Args, sessionFactory));
+				writer = outputStack.Pop();
+				Out(methodNode.Render(functionArguments.Args));
 			}
+		}
+
+		private void OutAggregateFunctionName(IASTNode m)
+		{
+			var aggregateNode = (AggregateNode) m;
+			Out(aggregateNode.FunctionName);
 		}
 
 		private void CommaBetweenParameters(String comma)
@@ -308,9 +300,23 @@ namespace NHibernate.Hql.Ast.ANTLR
 			writer.CommaBetweenParameters(comma);
 		}
 
+		private void StartJoinSubquery()
+		{
+			outputStack.Push(writer);
+			writer = new QueryWriter();
+		}
+
+		private void EndJoinSubquery(IASTNode node)
+		{
+			var joinSubquery = (JoinSubqueryFromElement) node;
+			var sqlString = ((QueryWriter) writer).ToSqlString();
+			writer = outputStack.Pop();
+			Out(joinSubquery.RenderText(sqlString, sessionFactory));
+		}
+
 		private void StartQuery()
 		{
-			outputStack.Insert(0, writer);
+			outputStack.Push(writer);
 			writer = new QueryWriter();
 		}
 
@@ -318,8 +324,7 @@ namespace NHibernate.Hql.Ast.ANTLR
 		{
 			SqlString sqlString = GetSqlStringWithLimitsIfNeeded((QueryWriter)writer);
 
-			writer = outputStack[0];
-			outputStack.RemoveAt(0);
+			writer = outputStack.Pop();
 			Out(sqlString);
 		}
 
@@ -388,7 +393,7 @@ namespace NHibernate.Hql.Ast.ANTLR
 			if (function == null)
 				return;
 
-			outputStack.Insert(0, writer);
+			outputStack.Push(writer);
 			writer = new BitwiseOpWriter();
 		}
 
@@ -399,8 +404,7 @@ namespace NHibernate.Hql.Ast.ANTLR
 				return;
 
 			var functionArguments = (BitwiseOpWriter)writer;
-			writer = outputStack[0];
-			outputStack.RemoveAt(0);
+			writer = outputStack.Pop();
 
 			Out(function.Render(functionArguments.Args, sessionFactory));
 		}
@@ -486,7 +490,6 @@ namespace NHibernate.Hql.Ast.ANTLR
 			{
 				return builder.ToSqlString();
 			}
-
 
 			#endregion
 		}

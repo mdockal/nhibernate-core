@@ -30,8 +30,14 @@ namespace NHibernate.Persister.Collection
 	/// <summary>
 	/// Summary description for AbstractCollectionPersister.
 	/// </summary>
-	public abstract partial class AbstractCollectionPersister : ICollectionMetadata, ISqlLoadableCollection,
-		IPostInsertIdentityPersister, ISupportSelectModeJoinable
+	public abstract partial class AbstractCollectionPersister : 
+		ICollectionMetadata, 
+		ISqlLoadableCollection,
+		IPostInsertIdentityPersister, 
+		ISupportSelectModeJoinable, 
+		ICompositeKeyPostInsertIdentityPersister, 
+		ISupportLazyPropsJoinable,
+		IPersister
 	{
 		protected static readonly object NotFoundPlaceHolder = new object();
 		private readonly string role;
@@ -91,6 +97,7 @@ namespace NHibernate.Persister.Collection
 
 		protected readonly string qualifiedTableName;
 		private readonly string queryLoaderName;
+		private readonly bool supportsQueryCache;
 
 		private readonly bool isPrimitiveArray;
 		private readonly bool isArray;
@@ -158,8 +165,8 @@ namespace NHibernate.Persister.Collection
 
 		private readonly string[] spaces;
 
-		private readonly IDictionary<string, object> collectionPropertyColumnAliases = new Dictionary<string, object>();
-		private readonly IDictionary<string, object> collectionPropertyColumnNames = new Dictionary<string, object>();
+		private readonly Dictionary<string, object> collectionPropertyColumnAliases = new Dictionary<string, object>();
+		private readonly Dictionary<string, object> collectionPropertyColumnNames = new Dictionary<string, object>();
 
 		private static readonly INHibernateLogger log = NHibernateLogger.For(typeof (ICollectionPersister));
 
@@ -530,6 +537,8 @@ namespace NHibernate.Persister.Collection
 											: Template.RenderOrderByStringTemplate(manyToManyOrderByString, factory.Dialect,
 																				   factory.SQLFunctionRegistry);
 			InitCollectionPropertyMap();
+
+			supportsQueryCache = collection.CacheConcurrencyStrategy != CacheFactory.Never;
 		}
 
 		public void PostInstantiate()
@@ -636,21 +645,27 @@ namespace NHibernate.Persister.Collection
 			get { return cache != null; }
 		}
 
+		/// <inheritdoc />
+		public bool SupportsQueryCache
+		{
+			get { return supportsQueryCache; }
+		}
+
 		public string GetSQLWhereString(string alias)
 		{
-			return StringHelper.Replace(sqlWhereStringTemplate, Template.Placeholder, alias);
+			return Template.ReplacePlaceholder(sqlWhereStringTemplate, alias);
 		}
 
 		public string GetSQLOrderByString(string alias)
 		{
-			return HasOrdering ? StringHelper.Replace(sqlOrderByStringTemplate, Template.Placeholder, alias) : string.Empty;
+			return HasOrdering ? Template.ReplacePlaceholder(sqlOrderByStringTemplate, alias) : string.Empty;
 		}
 
 		public string GetManyToManyOrderByString(string alias)
 		{
 			if (IsManyToMany && manyToManyOrderByString != null)
 			{
-				return StringHelper.Replace(manyToManyOrderByTemplate, Template.Placeholder, alias);
+				return Template.ReplacePlaceholder(manyToManyOrderByTemplate, alias);
 			}
 			else
 			{
@@ -857,32 +872,47 @@ namespace NHibernate.Persister.Collection
 			}
 		}
 
+		// Since v5.4
+		[Obsolete("Use GetSelectFragment method instead.")]
 		public string SelectFragment(string alias, string columnSuffix)
 		{
-			SelectFragment frag = GenerateSelectFragment(alias, columnSuffix);
+			return GetSelectFragment(alias, columnSuffix).ToSqlStringFragment(false);
+		}
+
+		/// <summary>
+		/// Gets the select fragment containing collection element, index and indentifier columns.
+		/// </summary>
+		/// <param name="alias">The table alias.</param>
+		/// <param name="columnSuffix">The column suffix.</param>
+		/// <returns>The select fragment containing collection element, index and indentifier columns.</returns>
+		public SelectFragment GetSelectFragment(string alias, string columnSuffix)
+		{
+			var frag = GenerateSelectFragment(alias, columnSuffix);
 			AppendElementColumns(frag, alias);
 			AppendIndexColumns(frag, alias);
 			AppendIdentifierColumns(frag, alias);
 
-			return frag.ToSqlStringFragment(false);
+			return frag;
 		}
-		private SqlString AddWhereFragment(SqlString sql)
+
+		private void AddWhereFragment(SqlSimpleSelectBuilder sql)
 		{
 			if (!hasWhere)
-				return sql;
-			return sql.Append(" and ").Append(sqlWhereString);
+				return;
+			sql.AddWhereFragment(sqlWhereString);
 		}
 
 		private SqlString GenerateSelectSizeString(ISessionImplementor sessionImplementor)
 		{
-			string selectValue = GetCountSqlSelectClause();
+			var selectValue = GetCountSqlSelectClause();
 
-			return new SqlSimpleSelectBuilder(dialect, factory)
-				.SetTableName(TableName)
-				.AddWhereFragment(KeyColumnNames, KeyType, "=")
-				.AddColumn(selectValue)
-				.ToSqlString()
-				.Append(FilterFragment(TableName, sessionImplementor.EnabledFilters));
+			return
+				new SqlSimpleSelectBuilder(dialect, factory)
+					.SetTableName(TableName)
+					.AddWhereFragment(KeyColumnNames, KeyType, "=")
+					.AddWhereFragment(FilterFragment(TableName, sessionImplementor.EnabledFilters))
+					.AddColumn(selectValue)
+					.ToSqlString();
 		}
 
 		protected virtual string GetCountSqlSelectClause()
@@ -906,14 +936,15 @@ namespace NHibernate.Persister.Collection
 			}
 
 			// TODO NH: may be we need something else when Index is mixed with Formula
-			var sqlString=
+			var builder =
 				new SqlSimpleSelectBuilder(dialect, factory)
 					.SetTableName(TableName)
 					.AddWhereFragment(KeyColumnNames, KeyType, "=")
 					.AddWhereFragment(IndexColumnNames, IndexType, "=")
 					.AddWhereFragment(indexFormulas, IndexType, "=")
-					.AddColumn("1").ToSqlString();
-			return AddWhereFragment(sqlString);
+					.AddColumn("1");
+			AddWhereFragment(builder);
+			return builder.ToSqlString();
 		}
 
 		private SqlString GenerateSelectRowByIndexString()
@@ -923,26 +954,29 @@ namespace NHibernate.Persister.Collection
 				return null;
 			}
 
-			var sqlString=new SqlSimpleSelectBuilder(dialect, factory)
-				.SetTableName(TableName)
-				.AddWhereFragment(KeyColumnNames, KeyType, "=")
-				.AddWhereFragment(IndexColumnNames, IndexType, "=")
-				.AddWhereFragment(indexFormulas, IndexType, "=")
-				.AddColumns(ElementColumnNames, elementColumnAliases)
-				.AddColumns(indexFormulas, indexColumnAliases).ToSqlString();
-			return AddWhereFragment(sqlString);
+			var builder =
+				new SqlSimpleSelectBuilder(dialect, factory)
+					.SetTableName(TableName)
+					.AddWhereFragment(KeyColumnNames, KeyType, "=")
+					.AddWhereFragment(IndexColumnNames, IndexType, "=")
+					.AddWhereFragment(indexFormulas, IndexType, "=")
+					.AddColumns(ElementColumnNames, elementColumnAliases)
+					.AddColumns(indexFormulas, indexColumnAliases);
+			AddWhereFragment(builder);
+			return builder.ToSqlString();
 		}
 
 		private SqlString GenerateDetectRowByElementString()
 		{
-			var sqlString=
+			var builder =
 				new SqlSimpleSelectBuilder(dialect, factory)
-				.SetTableName(TableName)
-				.AddWhereFragment(KeyColumnNames, KeyType, "=")
-				.AddWhereFragment(ElementColumnNames, ElementType, "=")
-				.AddWhereFragment(elementFormulas, ElementType, "=")
-				.AddColumn("1").ToSqlString();
-			return AddWhereFragment(sqlString);
+					.SetTableName(TableName)
+					.AddWhereFragment(KeyColumnNames, KeyType, "=")
+					.AddWhereFragment(ElementColumnNames, ElementType, "=")
+					.AddWhereFragment(elementFormulas, ElementType, "=")
+					.AddColumn("1");
+			AddWhereFragment(builder);
+			return builder.ToSqlString();
 		}
 
 		protected virtual SelectFragment GenerateSelectFragment(string alias, string columnSuffix)
@@ -1014,7 +1048,7 @@ namespace NHibernate.Persister.Collection
 			{
 				if (columnNames[i] == null)
 				{
-					result[i] = StringHelper.Replace(formulaTemplates[i], Template.Placeholder, alias);
+					result[i] = Template.ReplacePlaceholder(formulaTemplates[i], alias);
 				}
 				else
 				{
@@ -1369,10 +1403,17 @@ namespace NHibernate.Persister.Collection
 
 			if (manyToManyWhereString != null)
 			{
-				buffer.Append(" and ").Append(StringHelper.Replace(manyToManyWhereTemplate, Template.Placeholder, alias));
+				buffer.Append(" and ").Append(Template.ReplacePlaceholder(manyToManyWhereTemplate, alias));
 			}
 
 			return buffer.ToString();
+		}
+
+		// Since 5.4
+		[Obsolete("This method has no more usages and will be removed in a future version.")]
+		public bool IsManyToManyFiltered(IDictionary<string, IFilter> enabledFilters)
+		{
+			return IsManyToMany && (manyToManyWhereString != null || manyToManyFilterHelper.IsAffectedBy(enabledFilters));
 		}
 
 		public string[] ToColumns(string alias, string propertyName)
@@ -1462,10 +1503,16 @@ namespace NHibernate.Persister.Collection
 
 		public virtual string FilterFragment(string alias, IDictionary<string, IFilter> enabledFilters)
 		{
+			var filterFragment = FilterFragment(alias);
+			if (!filterHelper.IsAffectedBy(enabledFilters))
+				return filterFragment;
+
+			if (ElementType.IsEntityType && elementPersister is AbstractEntityPersister ep)
+				return ep.FilterFragment(filterHelper, alias, enabledFilters, filterFragment);
+
 			StringBuilder sessionFilterFragment = new StringBuilder();
 			filterHelper.Render(sessionFilterFragment, alias, enabledFilters);
-
-			return sessionFilterFragment.Append(FilterFragment(alias)).ToString();
+			return sessionFilterFragment.Append(filterFragment).ToString();
 		}
 
 		public string OneToManyFilterFragment(string alias)
@@ -1506,17 +1553,17 @@ namespace NHibernate.Persister.Collection
 
 		public void InitCollectionPropertyMap()
 		{
-			InitCollectionPropertyMap("key", keyType, keyColumnAliases, keyColumnNames);
-			InitCollectionPropertyMap("element", elementType, elementColumnAliases, elementColumnNames);
+			InitCollectionPropertyMap(CollectionPersister.PropKey, keyType, keyColumnAliases, keyColumnNames);
+			InitCollectionPropertyMap(CollectionPersister.PropElement, elementType, elementColumnAliases, elementColumnNames);
 
 			if (hasIndex)
 			{
-				InitCollectionPropertyMap("index", indexType, indexColumnAliases, indexColumnNames);
+				InitCollectionPropertyMap(CollectionPersister.PropIndex, indexType, indexColumnAliases, indexColumnNames);
 			}
 
 			if (hasIdentifier)
 			{
-				InitCollectionPropertyMap("id", identifierType, new string[] {identifierColumnAlias},
+				InitCollectionPropertyMap(CollectionPersister.PropId, identifierType, new string[] {identifierColumnAlias},
 										  new string[] {identifierColumnName});
 			}
 		}
@@ -1707,9 +1754,9 @@ namespace NHibernate.Persister.Collection
 
 		public abstract SqlString WhereJoinFragment(string alias, bool innerJoin, bool includeSubclasses);
 
-		// 6.0 TODO: Remove (Replace with ISupportSelectModeJoinable.SelectFragment)
+		// 6.0 TODO: Remove
 		// Since v5.2
-		[Obsolete("Use overload taking includeLazyProperties parameter")]
+		[Obsolete("Please use overload taking EntityLoadInfo")]
 		public virtual string SelectFragment(
 			IJoinable rhs,
 			string rhsAlias,
@@ -1718,14 +1765,27 @@ namespace NHibernate.Persister.Collection
 			string currentCollectionSuffix,
 			bool includeCollectionColumns)
 		{
-			return SelectFragment(
-				rhs, rhsAlias, lhsAlias, currentEntitySuffix, currentCollectionSuffix, includeCollectionColumns, false);
+			return SelectFragment(rhs, rhsAlias, lhsAlias, currentCollectionSuffix, includeCollectionColumns, new EntityLoadInfo(currentEntitySuffix));
 		}
 
-		// 6.0 TODO: Make abstract
+		// 6.0 TODO: Remove
+		[Obsolete("Please use overload taking EntityLoadInfo")]
 		public virtual string SelectFragment(
 			IJoinable rhs, string rhsAlias, string lhsAlias, string entitySuffix, string collectionSuffix,
 			bool includeCollectionColumns, bool includeLazyProperties)
+		{
+			return SelectFragment(rhs, rhsAlias, lhsAlias, collectionSuffix, includeCollectionColumns, new EntityLoadInfo(entitySuffix) {IncludeLazyProps = true});
+		}
+
+		// 6.0 TODO: Remove
+		[Obsolete("Please use overload without rhs and rhsAlias parameters")]
+		public virtual string SelectFragment(IJoinable rhs, string rhsAlias, string lhsAlias, string currentCollectionSuffix, bool includeCollectionColumns, EntityLoadInfo entityInfo)
+		{
+			return SelectFragment(lhsAlias, currentCollectionSuffix, includeCollectionColumns, entityInfo);
+		}
+
+		// 6.0 TODO: Make abstract
+		public virtual string SelectFragment(string lhsAlias, string collectionSuffix, bool includeCollectionColumns, EntityLoadInfo entityInfo)
 		{
 			throw new NotImplementedException("SelectFragment with fetching lazy properties option is not implemented by " + GetType().FullName);
 		}
@@ -2148,11 +2208,40 @@ namespace NHibernate.Persister.Collection
 			return batchSize;
 		}
 
+		// Since 5.2
+		[Obsolete("Use GetSelectByUniqueKeyString(string[] suppliedPropertyNames, out IType[] parameterTypes) instead.")]
 		public SqlString GetSelectByUniqueKeyString(string propertyName)
 		{
-			return
-				new SqlSimpleSelectBuilder(Factory.Dialect, Factory).SetTableName(qualifiedTableName).AddColumns(KeyColumnNames).
-					AddWhereFragment(KeyColumnNames, KeyType, " = ").ToSqlString();
+			return GetSelectByUniqueKeyString(null, out _);
+		}
+
+		public virtual SqlString GetSelectByUniqueKeyString(string[] suppliedPropertyNames, out IType[] parameterTypes)
+		{
+			if (suppliedPropertyNames != null)
+				throw new NotSupportedException("Collections does not support custom property names for selecting by unique key");
+
+			parameterTypes = HasIndex ?  new[] { KeyType, IndexType, ElementType } : new[] { KeyType, ElementType };
+			var builder =
+				new SqlSimpleSelectBuilder(Factory.Dialect, Factory)
+					.SetTableName(qualifiedTableName)
+					.AddColumns(new[] {identifierColumnName})
+					.AddWhereFragment(KeyColumnNames, KeyType, " = ");
+
+			if (HasIndex)
+				builder.AddWhereFragment(IndexColumnNames, IndexType, " = ");
+
+			return builder
+				.AddWhereFragment(ElementColumnNames, ElementType, " = ")
+				.ToSqlString();
+		}
+
+		public void BindSelectByUniqueKey(
+			ISessionImplementor session,
+			DbCommand selectCommand,
+			IBinder binder,
+			string[] suppliedPropertyNames)
+		{
+			binder.BindValues(selectCommand);
 		}
 
 		public string GetInfoString()

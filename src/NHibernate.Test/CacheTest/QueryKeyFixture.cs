@@ -1,9 +1,9 @@
-using System.Collections;
 using System.Collections.Generic;
 using NHibernate.Cache;
 using NHibernate.Engine;
 using NHibernate.Impl;
 using NHibernate.SqlCommand;
+using NHibernate.Util;
 using NUnit.Framework;
 
 namespace NHibernate.Test.CacheTest
@@ -35,13 +35,13 @@ namespace NHibernate.Test.CacheTest
 			f.SetParameter("pLike", "so%");
 			var fk =  new FilterKey(f);
 			ISet<FilterKey> fks = new HashSet<FilterKey> { fk };
-			qk = new QueryKey(Sfi, SqlAll, new QueryParameters(), fks, null);
+			qk = new QueryKey(Sfi, SqlAll, new QueryParameters(), fks, null, null);
 
 			var f1 = new FilterImpl(Sfi.GetFilterDefinition(filterName));
 			f1.SetParameter("pLike", sameValue ? "so%" : "%ing");
 			var fk1 = new FilterKey(f1);
 			fks = new HashSet<FilterKey> { fk1 };
-			qk1 = new QueryKey(Sfi, SqlAll, new QueryParameters(), fks, null);
+			qk1 = new QueryKey(Sfi, SqlAll, new QueryParameters(), fks, null, null);
 		}
 
 		private void QueryKeyFilterDescValueToCompare(out QueryKey qk, out QueryKey qk1, bool sameValue)
@@ -52,13 +52,13 @@ namespace NHibernate.Test.CacheTest
 			f.SetParameter("pDesc", "something").SetParameter("pValue", 10);
 			var fk = new FilterKey(f);
 			ISet<FilterKey> fks = new HashSet<FilterKey> { fk };
-			qk = new QueryKey(Sfi, SqlAll, new QueryParameters(), fks, null);
+			qk = new QueryKey(Sfi, SqlAll, new QueryParameters(), fks, null, null);
 
 			var f1 = new FilterImpl(Sfi.GetFilterDefinition(filterName));
 			f1.SetParameter("pDesc", "something").SetParameter("pValue", sameValue ? 10 : 11);
 			var fk1 = new FilterKey(f1);
 			fks = new HashSet<FilterKey> { fk1 };
-			qk1 = new QueryKey(Sfi, SqlAll, new QueryParameters(), fks, null);
+			qk1 = new QueryKey(Sfi, SqlAll, new QueryParameters(), fks, null, null);
 		}
 
 		[Test]
@@ -88,7 +88,7 @@ namespace NHibernate.Test.CacheTest
 		public void NotEqualHashCodeWithFilters()
 		{
 			// GetHashCode semantic does not guarantee no collision may ever occur, but the algorithm should
-			// generates different hashcodes for similar but inequal cases. These tests check that cache keys
+			// generates different hashcodes for similar but unequal cases. These tests check that cache keys
 			// for a query generated for different parameters values are no more equal.
 			QueryKeyFilterDescLikeToCompare(out var qk, out var qk1, false);
 			Assert.That(qk.GetHashCode(), Is.Not.EqualTo(qk1.GetHashCode()), "qk & qk1");
@@ -101,6 +101,20 @@ namespace NHibernate.Test.CacheTest
 		}
 
 		[Test]
+		public void HashCodeWithFiltersAndSerialization()
+		{
+			QueryKeyFilterDescLikeToCompare(out var qk, out var qk1, true);
+			var bytes = SerializationHelper.Serialize(qk);
+			qk = (QueryKey) SerializationHelper.Deserialize(bytes);
+			Assert.That(qk.GetHashCode(), Is.EqualTo(qk1.GetHashCode()), "Like");
+
+			QueryKeyFilterDescValueToCompare(out qk, out qk1, true);
+			bytes = SerializationHelper.Serialize(qk);
+			qk = (QueryKey) SerializationHelper.Deserialize(bytes);
+			Assert.That(qk.GetHashCode(), Is.EqualTo(qk1.GetHashCode()), "Value");
+		}
+
+		[Test]
 		public void ToStringWithFilters()
 		{
 			string filterName = "DescriptionLike";
@@ -108,7 +122,7 @@ namespace NHibernate.Test.CacheTest
 			f.SetParameter("pLike", "so%");
 			var fk = new FilterKey(f);
 			ISet<FilterKey> fks = new HashSet<FilterKey> { fk };
-			var qk = new QueryKey(Sfi, SqlAll, new QueryParameters(), fks, null);
+			var qk = new QueryKey(Sfi, SqlAll, new QueryParameters(), fks, null, null);
 			Assert.That(qk.ToString(), Does.Contain($"filters: ['{fk}']"), "Like");
 
 			filterName = "DescriptionEqualAndValueGT";
@@ -116,7 +130,7 @@ namespace NHibernate.Test.CacheTest
 			f.SetParameter("pDesc", "something").SetParameter("pValue", 10);
 			fk = new FilterKey(f);
 			fks = new HashSet<FilterKey> { fk };
-			qk = new QueryKey(Sfi, SqlAll, new QueryParameters(), fks, null);
+			qk = new QueryKey(Sfi, SqlAll, new QueryParameters(), fks, null, null);
 			Assert.That(qk.ToString(), Does.Contain($"filters: ['{fk}']"), "Value");
 		}
 
@@ -134,7 +148,7 @@ namespace NHibernate.Test.CacheTest
 			var fvk = new FilterKey(fv);
 
 			ISet<FilterKey> fks = new HashSet<FilterKey> { fk, fvk };
-			var qk = new QueryKey(Sfi, SqlAll, new QueryParameters(), fks, null);
+			var qk = new QueryKey(Sfi, SqlAll, new QueryParameters(), fks, null, null);
 			Assert.That(qk.ToString(), Does.Contain($"filters: ['{fk}', '{fvk}']"));
 		}
 	}

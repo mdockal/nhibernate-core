@@ -1,6 +1,8 @@
 using System;
 using System.Data;
 using System.Data.Common;
+using System.Globalization;
+using System.Numerics;
 using NHibernate.Engine;
 using NHibernate.SqlTypes;
 
@@ -13,39 +15,37 @@ namespace NHibernate.Type
 	[Serializable]
 	public class DoubleType : PrimitiveType
 	{
-		/// <summary></summary>
+		private static readonly object ZeroObject = 0D;
+
+		/// <summary />
 		public DoubleType() : base(SqlTypeFactory.Double)
 		{
 		}
 
-		public DoubleType(SqlType sqlType) : base(sqlType) {}
+		/// <summary />
+		public DoubleType(SqlType sqlType) : base(sqlType)
+		{
+		}
 
 		public override object Get(DbDataReader rs, int index, ISessionImplementor session)
 		{
-			return Convert.ToDouble(rs[index]);
-		}
-
-		public override object Get(DbDataReader rs, string name, ISessionImplementor session)
-		{
-			return Convert.ToDouble(rs[name]);
+			return rs[index] switch
+			{
+				BigInteger bi => (double) bi,
+				var v => Convert.ToDouble(v)
+			};
 		}
 
 		/// <summary></summary>
-		public override System.Type ReturnedClass
-		{
-			get { return typeof(double); }
-		}
+		public override System.Type ReturnedClass => typeof(double);
 
 		public override void Set(DbCommand st, object value, int index, ISessionImplementor session)
 		{
-			st.Parameters[index].Value = value;
+			st.Parameters[index].Value = Convert.ToDouble(value);
 		}
 
 		/// <summary></summary>
-		public override string Name
-		{
-			get { return "Double"; }
-		}
+		public override string Name => "Double";
 
 		// Since 5.2
 		[Obsolete("This method has no more usages and will be removed in a future version.")]
@@ -54,19 +54,13 @@ namespace NHibernate.Type
 			return double.Parse(xml);
 		}
 
-		public override System.Type PrimitiveClass
-		{
-			get { return typeof(double); }
-		}
+		public override System.Type PrimitiveClass => typeof(double);
 
-		public override object DefaultValue
-		{
-			get { return 0D; }
-		}
+		public override object DefaultValue => ZeroObject;
 
 		public override string ObjectToSQLString(object value, Dialect.Dialect dialect)
 		{
-			return value.ToString();
+			return ((double)value).ToString(CultureInfo.InvariantCulture);
 		}
 	}
 }

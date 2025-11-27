@@ -1,18 +1,40 @@
-using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data.Common;
+using System.Linq;
 using NHibernate.Engine;
 using NHibernate.Impl;
 using NHibernate.Param;
+using NHibernate.Persister.Collection;
 using NHibernate.Persister.Entity;
 using NHibernate.SqlCommand;
 using NHibernate.Transform;
-using NHibernate.Type;
 using NHibernate.Util;
 
 namespace NHibernate.Loader.Criteria
 {
+	internal static partial class CriteriaLoaderExtensions
+	{
+		/// <summary>
+		/// Loads all loaders results to single typed list
+		/// </summary>
+		internal static List<T> LoadAllToList<T>(this IList<CriteriaLoader> loaders, ISessionImplementor session)
+		{
+			var subresults = new List<IList>(loaders.Count);
+			foreach(var l in loaders)
+			{
+				subresults.Add(l.List(session));
+			}
+
+			var results = new List<T>(subresults.Sum(r => r.Count));
+			foreach(var list in subresults)
+			{
+				ArrayHelper.AddAll(results, list);
+			}
+			return results;
+		}
+	}
+
 	/// <summary>
 	/// A <c>Loader</c> for <see cref="ICriteria"/> queries. 
 	/// </summary>
@@ -29,6 +51,9 @@ namespace NHibernate.Loader.Criteria
 		private readonly string[] userAliases;
 		private readonly bool[] includeInResultRow;
 		private readonly int resultRowLength;
+
+		private readonly ISet<ICollectionPersister> _uncacheableCollectionPersisters;
+
 		// caching NH-3486
 		private readonly string[] cachedProjectedColumnAliases;
 		private bool[] childFetchEntities;
@@ -46,11 +71,13 @@ namespace NHibernate.Loader.Criteria
 
 			InitFromWalker(walker);
 
+			_uncacheableCollectionPersisters = translator.UncacheableCollectionPersisters;
 			userAliases = walker.UserAliases;
 			ResultTypes = walker.ResultTypes;
 			includeInResultRow = walker.IncludeInResultRow;
-			resultRowLength = ArrayHelper.CountTrue(IncludeInResultRow);
+			resultRowLength = ArrayHelper.CountTrue(includeInResultRow);
 			childFetchEntities = walker.ChildFetchEntities;
+			EntityFetchLazyProperties = walker.EntityFetchLazyProperties;
 			// fill caching objects only if there is a projection
 			if (translator.HasProjection)
 			{
@@ -58,6 +85,10 @@ namespace NHibernate.Loader.Criteria
 			}
 
 			PostInstantiate();
+			if (!translator.HasProjection)
+			{
+				CachePersistersWithCollections(ArrayHelper.IndexesOf(includeInResultRow, true));
+			}
 		}
 
 		// Not ported: scroll (not supported)
@@ -65,6 +96,11 @@ namespace NHibernate.Loader.Criteria
 		public ISet<string> QuerySpaces
 		{
 			get { return querySpaces; }
+		}
+
+		public override bool IsCacheable(QueryParameters queryParameters)
+		{
+			return IsCacheable(queryParameters, translator.SupportsQueryCache, translator.GetPersisters());
 		}
 
 		public override bool IsSubselectLoadingEnabled
@@ -92,6 +128,8 @@ namespace NHibernate.Loader.Criteria
 			return childFetchEntities?[i] == true;
 		}
 
+		protected override ISet<string>[] EntityFetchLazyProperties { get; }
+
 		public IList List(ISessionImplementor session)
 		{
 			return List(session, translator.GetQueryParameters(), querySpaces);
@@ -113,7 +151,6 @@ namespace NHibernate.Loader.Criteria
 			return ResolveResultTransformer(customResultTransformer)
 				.TransformTuple(GetResultRow(row, rs, session), ResultRowAliases);
 		}
-
 
 		protected override object[] GetResultRow(object[] row, DbDataReader rs, ISessionImplementor session)
 		{
@@ -145,7 +182,6 @@ namespace NHibernate.Loader.Criteria
 			}
 			return result;
 		}
-
 
 		private object[] ToResultRow(object[] row)
 		{
@@ -226,6 +262,11 @@ namespace NHibernate.Loader.Criteria
 		protected override IEnumerable<IParameterSpecification> GetParameterSpecifications()
 		{
 			return translator.CollectedParameterSpecifications;
+		}
+
+		protected override bool IsCollectionPersisterCacheable(ICollectionPersister collectionPersister)
+		{
+			return !_uncacheableCollectionPersisters.Contains(collectionPersister);
 		}
 	}
 }

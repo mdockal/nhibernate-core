@@ -58,6 +58,9 @@ namespace NHibernate.Test.Criteria
 		[Test]
 		public void UsingSqlFunctions_Concat()
 		{
+			if (TestDialect.HasBrokenTypeInferenceOnSelectedParameters)
+				Assert.Ignore("Current dialect does not support this test");
+
 			using (ISession session = Sfi.OpenSession())
 			{
 				string result = session.CreateCriteria(typeof(Student))
@@ -77,8 +80,11 @@ namespace NHibernate.Test.Criteria
 		{
 			if(Dialect is Oracle8iDialect)
 			{
-				Assert.Ignore("Not supported by the active dialect:{0}.", Dialect);
+				Assert.Ignore($"Not supported by the active dialect:{Dialect}.");
 			}
+			if (TestDialect.HasBrokenTypeInferenceOnSelectedParameters)
+				Assert.Ignore("Current dialect does not support this test");
+
 			using (ISession session = Sfi.OpenSession())
 			{
 				string result = session.CreateCriteria(typeof(Student))
@@ -165,6 +171,9 @@ namespace NHibernate.Test.Criteria
 		[Test]
 		public void UsingConditionals()
 		{
+			if (TestDialect.HasBrokenTypeInferenceOnSelectedParameters)
+				Assert.Ignore("Current dialect does not support this test");
+
 			using (ISession session = Sfi.OpenSession())
 			{
 				string result = session.CreateCriteria(typeof(Student))
@@ -176,7 +185,6 @@ namespace NHibernate.Test.Criteria
 					)
 					.UniqueResult<string>();
 				Assert.AreEqual("yes", result);
-
 
 				result = session.CreateCriteria(typeof(Student))
 					.SetProjection(
@@ -201,7 +209,6 @@ namespace NHibernate.Test.Criteria
 				Assert.AreEqual(27L, list[0].StudentNumber);
 			}
 		}
-
 
 		[Test]
 		public void UseLikeWithProjection()
@@ -250,7 +257,6 @@ namespace NHibernate.Test.Criteria
 				Assert.AreEqual(27L, list[0].StudentNumber);
 			}
 		}
-
 
 		[Test]
 		public void UseGtWithProjection()

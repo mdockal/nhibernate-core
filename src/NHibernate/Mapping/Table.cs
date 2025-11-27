@@ -27,7 +27,7 @@ namespace NHibernate.Mapping
 	public class Table : IRelationalModel
 	{
 		private readonly List<string> checkConstraints = new List<string>();
-		private readonly LinkedHashMap<string, Column> columns = new LinkedHashMap<string, Column>();
+		private readonly LinkHashMap<string, Column> columns = new();
 		private readonly Dictionary<ForeignKeyKey, ForeignKey> foreignKeys = new Dictionary<ForeignKeyKey, ForeignKey>();
 		private readonly Dictionary<string, Index> indexes = new Dictionary<string, Index>();
 		private int? uniqueInteger;
@@ -406,7 +406,7 @@ namespace NHibernate.Mapping
 
 				if (col.IsUnique)
 				{
-					if (dialect.SupportsUnique)
+					if (dialect.SupportsUnique && (!col.IsNullable || dialect.SupportsNullInUnique))
 					{
 						buf.Append(" unique");
 					}
@@ -453,7 +453,7 @@ namespace NHibernate.Mapping
 			{
 				foreach (ForeignKey foreignKey in ForeignKeyIterator)
 				{
-					if (foreignKey.HasPhysicalConstraint)
+					if (foreignKey.IsGenerated(dialect))
 					{
 						buf.Append(",").Append(foreignKey.SqlConstraintString(dialect, foreignKey.Name, defaultCatalog, defaultSchema));
 					}
@@ -669,7 +669,7 @@ namespace NHibernate.Mapping
 				}
 
 				bool useUniqueConstraint = column.Unique && dialect.SupportsUnique
-										   && (!column.IsNullable || dialect.SupportsNotNullUnique);
+										   && (!column.IsNullable || dialect.SupportsNullInUnique);
 				if (useUniqueConstraint)
 				{
 					alter.Append(" unique");
@@ -1052,7 +1052,6 @@ namespace NHibernate.Mapping
 			return validationErrors;
 		}
 
-
 		#region Nested type: ForeignKeyKey
 		[Serializable]
 		internal class ForeignKeyKey : IEqualityComparer<ForeignKeyKey>
@@ -1065,9 +1064,12 @@ namespace NHibernate.Mapping
 			{
 				this.referencedClassName = referencedClassName;
 				this.columns = new List<Column>(columns);
+				this.columns.TrimExcess();
+
 				if (referencedColumns != null)
 				{
 					this.referencedColumns = new List<Column>(referencedColumns);
+					this.referencedColumns.TrimExcess();
 				}
 				else
 				{

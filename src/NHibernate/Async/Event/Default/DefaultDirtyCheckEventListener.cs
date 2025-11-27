@@ -9,7 +9,8 @@
 
 
 using System;
-
+using NHibernate.Engine;
+using NHibernate.Util;
 
 namespace NHibernate.Event.Default
 {

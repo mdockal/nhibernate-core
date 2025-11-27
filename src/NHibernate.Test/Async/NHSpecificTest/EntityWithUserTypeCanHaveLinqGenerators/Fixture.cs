@@ -17,7 +17,6 @@ using NUnit.Framework;
 namespace NHibernate.Test.NHSpecificTest.EntityWithUserTypeCanHaveLinqGenerators
 {
 	using System.Threading.Tasks;
-
 	[TestFixture]
 	public class FixtureAsync : TestCase
 	{
@@ -33,7 +32,6 @@ namespace NHibernate.Test.NHSpecificTest.EntityWithUserTypeCanHaveLinqGenerators
 
 		protected override void Configure(Configuration configuration)
 		{
-			base.Configure(configuration);
 			configuration.LinqToHqlGeneratorsRegistry<EntityWithUserTypePropertyGeneratorsRegistry>();
 		}
 
@@ -93,21 +91,6 @@ namespace NHibernate.Test.NHSpecificTest.EntityWithUserTypeCanHaveLinqGenerators
 					.ToListAsync());
 
 				Assert.AreEqual(1, entities.Count);
-			}
-		}
-
-		[Test, Ignore("Not implemented yet")]
-		public async Task LinqMethodWorksForUserTypeAsync()
-		{
-			using (var session = OpenSession())
-			using (session.BeginTransaction())
-			{
-				var newItem = new BarExample { Value = "Larry" };
-				var entities = await (session.Query<EntityWithUserTypeProperty>()
-					.Where(x => x.Example.IsEquivalentTo(newItem))
-					.ToListAsync());
-
-				Assert.AreEqual(2, entities.Count);
 			}
 		}
 

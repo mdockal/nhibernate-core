@@ -22,11 +22,9 @@ namespace NHibernate.Test.Linq
 
 		protected override void Configure(Configuration configuration)
 		{
-			base.Configure(configuration);
 			configuration.SetProperty(Environment.BatchStrategy,
 									  typeof(TimeoutCatchingNonBatchingBatcherFactory).AssemblyQualifiedName);
 		}
-
 
 		[Test]
 		public void CanSetTimeoutOnLinqQueries()
@@ -39,7 +37,6 @@ namespace NHibernate.Test.Linq
 
 			Assert.That(TimeoutCatchingNonBatchingBatcher.LastCommandTimeout, Is.EqualTo(17));
 		}
-
 
 		[Test]
 		public void CanSetTimeoutOnLinqPagingQuery()
@@ -54,7 +51,6 @@ namespace NHibernate.Test.Linq
 			Assert.That(TimeoutCatchingNonBatchingBatcher.LastCommandTimeout, Is.EqualTo(17));
 		}
 
-
 		[Test]
 		public void CanSetTimeoutBeforeSkipOnLinqOrderedPageQuery()
 		{
@@ -67,7 +63,6 @@ namespace NHibernate.Test.Linq
 
 			Assert.That(TimeoutCatchingNonBatchingBatcher.LastCommandTimeout, Is.EqualTo(17));
 		}
-
 
 		[Test]
 		public void CanSetTimeoutOnLinqGroupPageQuery()
@@ -88,12 +83,10 @@ namespace NHibernate.Test.Linq
 			Assert.That(TimeoutCatchingNonBatchingBatcher.LastCommandTimeout, Is.EqualTo(17));
 		}
 
-
 		public partial class TimeoutCatchingNonBatchingBatcher : NonBatchingBatcher
 		{
 			// Is there an easier way to inspect the DbCommand instead of
 			// creating a custom batcher?
-
 
 			public static int LastCommandTimeout;
 
@@ -108,7 +101,6 @@ namespace NHibernate.Test.Linq
 				return base.ExecuteReader(cmd);
 			}
 		}
-
 
 		public partial class TimeoutCatchingNonBatchingBatcherFactory : IBatcherFactory
 		{

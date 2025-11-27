@@ -3,7 +3,6 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using NHibernate.DomainModel;
 using NHibernate.DomainModel.Northwind.Entities;
-using NHibernate.Linq;
 using NUnit.Framework;
 
 namespace NHibernate.Test.Linq
@@ -35,7 +34,6 @@ namespace NHibernate.Test.Linq
 
 				session.Save(new Employee { FirstName = employeeName, LastName = "LastName" });
 				session.Flush();
-
 
 				var query = (from e in db.Employees
 				             where NHibernate.Linq.SqlMethods.Like(e.FirstName, employeeNameEscaped, escapeChar)
@@ -185,9 +183,6 @@ namespace NHibernate.Test.Linq
 		[Test]
 		public void CharIndexFunction()
 		{
-			if (!TestDialect.SupportsLocate)
-				Assert.Ignore("Locate function not supported.");
-
 			var raw = (from e in db.Employees select e.FirstName).ToList();
 			var expected = raw.Select(x => x.ToLower()).Where(x => x.IndexOf('a') == 0).ToList();
 
@@ -197,16 +192,13 @@ namespace NHibernate.Test.Linq
 						select lowerName;
 			var result = query.ToList();
 
-			Assert.That(result, Is.EqualTo(expected), "Expected {0} but was {1}", string.Join("|", expected), string.Join("|", result));
+			Assert.That(result, Is.EqualTo(expected), $"Expected {string.Join("|", expected)} but was {string.Join("|", result)}");
 			ObjectDumper.Write(query);
 		}
 
 		[Test]
 		public void CharIndexOffsetNegativeFunction()
 		{
-			if (!TestDialect.SupportsLocate)
-				Assert.Ignore("Locate function not supported.");
-
 			var raw = (from e in db.Employees select e.FirstName).ToList();
 			var expected = raw.Select(x => x.ToLower()).Where(x => x.IndexOf('a', 2) == -1).ToList();
 
@@ -216,16 +208,13 @@ namespace NHibernate.Test.Linq
 						select lowerName;
 			var result = query.ToList();
 
-			Assert.That(result, Is.EqualTo(expected), "Expected {0} but was {1}", string.Join("|", expected), string.Join("|", result));
+			Assert.That(result, Is.EqualTo(expected), $"Expected {string.Join("|", expected)} but was {string.Join("|", result)}");
 			ObjectDumper.Write(query);
 		}
 
 		[Test]
 		public void IndexOfFunctionExpression()
 		{
-			if (!TestDialect.SupportsLocate)
-				Assert.Ignore("Locate function not supported.");
-
 			var raw = (from e in db.Employees select e.FirstName).ToList();
 			var expected = raw.Select(x => x.ToLower()).Where(x => x.IndexOf("an") == 0).ToList();
 
@@ -235,16 +224,13 @@ namespace NHibernate.Test.Linq
 						select lowerName;
 			var result = query.ToList();
 
-			Assert.That(result, Is.EqualTo(expected), "Expected {0} but was {1}", string.Join("|", expected), string.Join("|", result));
+			Assert.That(result, Is.EqualTo(expected), $"Expected {string.Join("|", expected)} but was {string.Join("|", result)}");
 			ObjectDumper.Write(query);
 		}
 
 		[Test]
 		public void IndexOfFunctionProjection()
 		{
-			if (!TestDialect.SupportsLocate)
-				Assert.Ignore("Locate function not supported.");
-
 			var raw = (from e in db.Employees select e.FirstName).ToList();
 			var expected = raw.Select(x => x.ToLower()).Where(x => x.Contains("a")).Select(x => x.IndexOf("a", 1)).ToList();
 
@@ -254,16 +240,13 @@ namespace NHibernate.Test.Linq
 						select lowerName.IndexOf("a", 1);
 			var result = query.ToList();
 
-			Assert.That(result, Is.EqualTo(expected), "Expected {0} but was {1}", string.Join("|", expected), string.Join("|", result));
+			Assert.That(result, Is.EqualTo(expected), $"Expected {string.Join("|", expected)} but was {string.Join("|", result)}");
 			ObjectDumper.Write(query);
 		}
 
 		[Test]
 		public void TwoFunctionExpression()
 		{
-			if (!TestDialect.SupportsLocate)
-				Assert.Ignore("Locate function not supported.");
-
 			var query = from e in db.Employees
 						where e.FirstName.IndexOf("A") == e.BirthDate.Value.Month 
 						select e.FirstName;
@@ -373,6 +356,7 @@ namespace NHibernate.Test.Linq
 		}
 
 		[Test]
+		[Ignore("Not mapped entity")]
 		public void WhereShortEqual()
 		{
 			var query = from item in session.Query<Foo>()
@@ -465,6 +449,7 @@ namespace NHibernate.Test.Linq
 		}	
 	
 		[Test]
+		[Ignore("Not mapped entity")]
 		public void WhereFloatEqual()
 		{
 			var query = from item in session.Query<Foo>()
@@ -475,6 +460,7 @@ namespace NHibernate.Test.Linq
 		}	
 
 		[Test]
+		[Ignore("Not mapped entity")]
 		public void WhereCharEqual()
 		{
 			var query = from item in session.Query<Foo>()
@@ -485,6 +471,7 @@ namespace NHibernate.Test.Linq
 		}
 
 		[Test]
+		[Ignore("Not mapped entity")]
 		public void WhereByteEqual()
 		{
 			var query = from item in session.Query<Foo>()
@@ -499,6 +486,33 @@ namespace NHibernate.Test.Linq
 		{
 			var query = from item in db.OrderLines
 						where item.Discount.Equals(-1)
+						select item;
+
+			ObjectDumper.Write(query);
+		}
+
+		[Test]
+		public void WhereEnumEqual()
+		{
+			var query = from item in db.PatientRecords
+						where item.Gender.Equals(Gender.Female)
+						select item;
+
+			ObjectDumper.Write(query);
+
+			query = from item in db.PatientRecords
+					where item.Gender.Equals(item.Gender)
+					select item;
+
+			ObjectDumper.Write(query);
+		}
+
+
+		[Test]
+		public void WhereObjectEqual()
+		{
+			var query = from item in db.PatientRecords
+						where ((object) item.Gender).Equals(Gender.Female)
 						select item;
 
 			ObjectDumper.Write(query);

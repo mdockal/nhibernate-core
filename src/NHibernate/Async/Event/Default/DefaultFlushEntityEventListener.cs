@@ -336,41 +336,35 @@ namespace NHibernate.Event.Default
 		/// to synchronize its state to the database. Modifies the event by side-effect!
 		/// Note: this method is quite slow, avoid calling if possible!
 		/// </summary>
-		protected Task<bool> IsUpdateNecessaryAsync(FlushEntityEvent @event, CancellationToken cancellationToken)
+		protected async Task<bool> IsUpdateNecessaryAsync(FlushEntityEvent @event, CancellationToken cancellationToken)
 		{
-			if (cancellationToken.IsCancellationRequested)
-			{
-				return Task.FromCanceled<bool>(cancellationToken);
-			}
-			try
-			{
-				IEntityPersister persister = @event.EntityEntry.Persister;
-				Status status = @event.EntityEntry.Status;
+			cancellationToken.ThrowIfCancellationRequested();
+			IEntityPersister persister = @event.EntityEntry.Persister;
+			Status status = @event.EntityEntry.Status;
 
-				if (!@event.DirtyCheckPossible)
-				{
-					return Task.FromResult<bool>(true);
-				}
-				else
-				{
-
-					int[] dirtyProperties = @event.DirtyProperties;
-					if (dirtyProperties != null && dirtyProperties.Length != 0)
-					{
-						return Task.FromResult<bool>(true); //TODO: suck into event class
-					}
-					else
-					{
-						return HasDirtyCollectionsAsync(@event, persister, status, cancellationToken);
-					}
-				}
-			}
-			catch (Exception ex)
+			if (!@event.DirtyCheckPossible)
 			{
-				return Task.FromException<bool>(ex);
+				return true;
+			}
+			else
+			{
+				// call to HasDirtyCollections must not be optimized away because of its side effect
+				bool hasDirtyCollections = await (HasDirtyCollectionsAsync(@event, persister, status, cancellationToken)).ConfigureAwait(false);
+
+				int[] dirtyProperties = @event.DirtyProperties;
+				return dirtyProperties != null && dirtyProperties.Length != 0 || hasDirtyCollections;
 			}
 		}
 
+		/// <summary>
+		/// Check if there are any dirty collections.
+		/// Has a side effect of setting the HasDirtyCollection property of the event.
+		/// </summary>
+		/// <param name="event"></param>
+		/// <param name="persister"></param>
+		/// <param name="status"></param>
+		/// <param name="cancellationToken">A cancellation token that can be used to cancel the work</param>
+		/// <returns></returns>
 		private async Task<bool> HasDirtyCollectionsAsync(FlushEntityEvent @event, IEntityPersister persister, Status status, CancellationToken cancellationToken)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -462,7 +456,6 @@ namespace NHibernate.Event.Default
 			@event.DirtyCheckPossible = !cannotDirtyCheck;
 		}
 
-
 		private async Task<object[]> GetDatabaseSnapshotAsync(ISessionImplementor session, IEntityPersister persister, object id, CancellationToken cancellationToken)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -490,6 +483,5 @@ namespace NHibernate.Event.Default
 				return session.PersistenceContext.GetCachedDatabaseSnapshot(entityKey);
 			}
 		}
-
 	}
 }

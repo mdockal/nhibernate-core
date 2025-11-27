@@ -31,7 +31,11 @@ namespace NHibernate.Impl
 		internal StatelessSessionImpl(SessionFactoryImpl factory, ISessionCreationOptions options)
 			: base(factory, options)
 		{
-			using (BeginContext())
+			// This context is disposed only on session own disposal. This greatly reduces the number of context switches
+			// for most usual session usages. It may cause an irrelevant session id to be set back on disposal, but since all
+			// session entry points are supposed to set it, it should not have any consequences.
+			_context = SessionIdLoggingContext.CreateOrNull(SessionId);
+			try
 			{
 				temporaryPersistenceContext = new StatefulPersistenceContext(this);
 
@@ -42,6 +46,11 @@ namespace NHibernate.Impl
 				}
 
 				CheckAndUpdateSessionStatus();
+			}
+			catch
+			{
+				_context?.Dispose();
+				throw;
 			}
 		}
 
@@ -101,6 +110,10 @@ namespace NHibernate.Impl
 		{
 			using (BeginProcess())
 			{
+				// We need to flush the batcher. Otherwise it may have pending operations which will not already have reached the database,
+				// and the query may yield stale data.
+				Flush();
+
 				queryParameters.ValidateParameters();
 				var plan = GetHQLQueryPlan(queryExpression, false);
 
@@ -127,28 +140,30 @@ namespace NHibernate.Impl
 			}
 		}
 
-		public override void List(CriteriaImpl criteria, IList results)
+		public override IList<T> List<T>(CriteriaImpl criteria)
 		{
 			using (BeginProcess())
 			{
+				// We need to flush the batcher. Otherwise it may have pending operations which will not already have reached the database,
+				// and the query may yield stale data.
+				Flush();
+
 				string[] implementors = Factory.GetImplementors(criteria.EntityOrClassName);
 				int size = implementors.Length;
 
 				CriteriaLoader[] loaders = new CriteriaLoader[size];
 				for (int i = 0; i < size; i++)
 				{
-					loaders[i] = new CriteriaLoader(GetOuterJoinLoadable(implementors[i]), Factory,
+					loaders[size - 1 - i] = new CriteriaLoader(GetOuterJoinLoadable(implementors[i]), Factory,
 													criteria, implementors[i], EnabledFilters);
 				}
 
 				bool success = false;
 				try
 				{
-					for (int i = size - 1; i >= 0; i--)
-					{
-						ArrayHelper.AddAll(results, loaders[i].List(this));
-					}
+					var results = loaders.LoadAllToList<T>(this);
 					success = true;
+					return results;
 				}
 				catch (HibernateException)
 				{
@@ -162,9 +177,15 @@ namespace NHibernate.Impl
 				finally
 				{
 					AfterOperation(success);
+					temporaryPersistenceContext.Clear();
 				}
-				temporaryPersistenceContext.Clear();
 			}
+		}
+
+		//TODO 6.0: Remove (use base class implementation)
+		public override void List(CriteriaImpl criteria, IList results)
+		{
+			ArrayHelper.AddAll(results, List(criteria));
 		}
 
 		public override IEnumerable Enumerable(IQueryExpression queryExpression, QueryParameters queryParameters)
@@ -235,11 +256,18 @@ namespace NHibernate.Impl
 			}
 		}
 
+		//Since 5.3
+		[Obsolete("Use override with persister parameter")]
 		public override object Instantiate(string clazz, object id)
+		{
+		  return Instantiate(Factory.GetEntityPersister(clazz), id);
+		}
+
+		public override object Instantiate(IEntityPersister persister, object id)
 		{
 			using (BeginProcess())
 			{
-				return Factory.GetEntityPersister(clazz).Instantiate(id);
+				return persister.Instantiate(id);
 			}
 		}
 
@@ -247,6 +275,10 @@ namespace NHibernate.Impl
 		{
 			using (BeginProcess())
 			{
+				// We need to flush the batcher. Otherwise it may have pending operations which will not already have reached the database,
+				// and the query may yield stale data.
+				Flush();
+
 				var loader = new CustomLoader(customQuery, Factory);
 
 				var success = false;
@@ -331,7 +363,7 @@ namespace NHibernate.Impl
 
 		public override FlushMode FlushMode
 		{
-			get { return FlushMode.Commit; }
+			get { return FlushMode.Always; }
 			set { throw new NotSupportedException(); }
 		}
 
@@ -418,6 +450,10 @@ namespace NHibernate.Impl
 				{
 					throw new SessionException("Session was already closed!");
 				}
+				// We need to flush the batcher. Otherwise it may have pending operations which will never reach the database,
+				// although a stateless session is not supposed to retain anything in memory and so should not need any explicit
+				// flush from users.
+				Flush();
 				CloseConnectionManager();
 				SetClosed();
 			}
@@ -519,40 +555,36 @@ namespace NHibernate.Impl
 			}
 		}
 
-		/// <summary> Retrieve a entity. </summary>
+		/// <summary> Retrieve an entity. </summary>
 		/// <returns> a detached entity instance </returns>
 		public object Get(string entityName, object id)
 		{
 			return Get(entityName, id, LockMode.None);
 		}
 
-		/// <summary> Retrieve a entity.
-		///
+		/// <summary>
+		/// Retrieve an entity.
 		/// </summary>
 		/// <returns> a detached entity instance
 		/// </returns>
 		public T Get<T>(object id)
 		{
-			using (BeginProcess())
-			{
-				return (T)Get(typeof(T), id);
-			}
-		}
-
-		private object Get(System.Type persistentClass, object id)
-		{
-			return Get(persistentClass.FullName, id);
+			return (T) Get(typeof(T).FullName, id);
 		}
 
 		/// <summary>
-		/// Retrieve a entity, obtaining the specified lock mode.
+		/// Retrieve an entity, obtaining the specified lock mode.
 		/// </summary>
 		/// <returns> a detached entity instance </returns>
 		public object Get(string entityName, object id, LockMode lockMode)
 		{
 			using (BeginProcess())
 			{
-				object result = Factory.GetEntityPersister(entityName).Load(id, null, lockMode, this);
+				// We need to flush the batcher. Otherwise it may have pending operations which will not already have reached the database,
+				// and the get may miss an entity which should be there.
+				Flush();
+
+				object result = Factory.GetEntityPersister(entityName).Load(id, null, lockMode ?? LockMode.None, this);
 				if (temporaryPersistenceContext.IsLoadFinished)
 				{
 					temporaryPersistenceContext.Clear();
@@ -562,15 +594,12 @@ namespace NHibernate.Impl
 		}
 
 		/// <summary>
-		/// Retrieve a entity, obtaining the specified lock mode.
+		/// Retrieve an entity, obtaining the specified lock mode.
 		/// </summary>
 		/// <returns> a detached entity instance </returns>
 		public T Get<T>(object id, LockMode lockMode)
 		{
-			using (BeginProcess())
-			{
-				return (T)Get(typeof(T).FullName, id, lockMode);
-			}
+			return (T) Get(typeof(T).FullName, id, lockMode);
 		}
 
 		/// <summary>
@@ -618,6 +647,10 @@ namespace NHibernate.Impl
 		{
 			using (BeginProcess())
 			{
+				// We need to flush the batcher. Otherwise it may have pending operations which will not already have reached the database,
+				// and the query may yield stale data.
+				Flush();
+
 				IEntityPersister persister = GetEntityPersister(entityName, entity);
 				object id = persister.GetIdentifier(entity);
 				if (log.IsDebugEnabled())
@@ -748,14 +781,7 @@ namespace NHibernate.Impl
 		#region IDisposable Members
 
 		private bool _isAlreadyDisposed;
-
-		/// <summary>
-		/// Finalizer that ensures the object is correctly disposed of.
-		/// </summary>
-		~StatelessSessionImpl()
-		{
-			Dispose(false);
-		}
+		private IDisposable _context;
 
 		///<summary>
 		///Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
@@ -776,6 +802,10 @@ namespace NHibernate.Impl
 				// with a null ref rather than silently leaking a session. And then fix the synchronization.
 				if (TransactionContext != null && TransactionContext.CanFlushOnSystemTransactionCompleted)
 				{
+					// We need to flush the batcher. Otherwise it may have pending operations which will never reach the database,
+					// although a stateless session is not supposed to retain anything in memory and so should not need any explicit
+					// flush from users.
+					Flush();
 					TransactionContext.ShouldCloseSessionOnSystemTransactionCompleted = true;
 					return;
 				}
@@ -783,6 +813,7 @@ namespace NHibernate.Impl
 			}
 		}
 
+		//TODO: Get rid of isDisposing parameter. Finalizer is removed as not needed, so isDisposing  is always true
 		protected void Dispose(bool isDisposing)
 		{
 			using (BeginContext())
@@ -795,17 +826,18 @@ namespace NHibernate.Impl
 
 				// free managed resources that are being managed by the session if we
 				// know this call came through Dispose()
-				if (isDisposing && !IsClosed)
+				if (isDisposing)
 				{
-					Close();
+					if (!IsClosed)
+					{
+						Close();
+					}
 				}
 
 				// free unmanaged resources here
-
 				_isAlreadyDisposed = true;
-				// nothing for Finalizer to do - so tell the GC to ignore it
-				GC.SuppressFinalize(this);
 			}
+			_context?.Dispose();
 		}
 
 		#endregion

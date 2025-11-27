@@ -27,17 +27,23 @@ namespace NHibernate.Collection
 	public partial class PersistentArrayHolder : AbstractPersistentCollection, ICollection
 	{
 
-		public override async Task<ICollection> GetOrphansAsync(object snapshot, string entityName, CancellationToken cancellationToken)
+		//Since 5.3
+		/// <inheritdoc />
+		[Obsolete("This method has no more usages and will be removed in a future version")]
+		public override Task<ICollection> GetOrphansAsync(object snapshot, string entityName, CancellationToken cancellationToken)
 		{
-			cancellationToken.ThrowIfCancellationRequested();
-			object[] sn = (object[]) snapshot;
-			object[] arr = (object[]) array;
-			List<object> result = new List<object>(sn);
-			for (int i = 0; i < sn.Length; i++)
+			if (cancellationToken.IsCancellationRequested)
 			{
-				await (IdentityRemoveAsync(result, arr[i], entityName, Session, cancellationToken)).ConfigureAwait(false);
+				return Task.FromCanceled<ICollection>(cancellationToken);
 			}
-			return result;
+			try
+			{
+				return Task.FromResult<ICollection>(GetOrphans(snapshot, entityName));
+			}
+			catch (Exception ex)
+			{
+				return Task.FromException<ICollection>(ex);
+			}
 		}
 
 		public override async Task<bool> EqualsSnapshotAsync(ICollectionPersister persister, CancellationToken cancellationToken)
@@ -88,9 +94,24 @@ namespace NHibernate.Collection
 
 			array = System.Array.CreateInstance(persister.ElementClass, cached.Length);
 
+			var elementType = persister.ElementType;
+			await (BeforeAssembleAsync(elementType, cached, cancellationToken)).ConfigureAwait(false);
+
 			for (int i = 0; i < cached.Length; i++)
 			{
-				array.SetValue(await (persister.ElementType.AssembleAsync(cached[i], Session, owner, cancellationToken)).ConfigureAwait(false), i);
+				array.SetValue(await (elementType.AssembleAsync(cached[i], Session, owner, cancellationToken)).ConfigureAwait(false), i);
+			}
+		}
+
+		private async Task BeforeAssembleAsync(IType elementType, object[] cached, CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (Session.PersistenceContext.BatchFetchQueue.QueryCacheQueue != null)
+				return;
+
+			for (int i = 0; i < cached.Length; i++)
+			{
+				await (elementType.BeforeAssembleAsync(cached[i], Session, cancellationToken)).ConfigureAwait(false);
 			}
 		}
 

@@ -24,7 +24,6 @@ namespace NHibernate.Test.NHSpecificTest.NH1098
 		{
 			using (ISession session = OpenSession())
 			{
-
 				var a1 = new A { Id = 1, ValueA = 5, Enabled = false };
 				session.Save(a1);
 
@@ -205,7 +204,7 @@ namespace NHibernate.Test.NHSpecificTest.NH1098
 
 				var a = await (query.UniqueResultAsync<A>());
 
-				Assert.AreEqual(a.C[1], "Text1");
+				Assert.AreEqual("Text1", a.C[1]);
 			}
 		}
 	}

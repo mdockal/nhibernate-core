@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using NHibernate.Cfg.MappingSchema;
@@ -54,7 +55,7 @@ namespace NHibernate.Mapping.ByCode.Impl
 
 		public void OptimisticLock(bool takeInConsiderationForOptimisticLock)
 		{
-			// not supported by HbmOneToOne
+			_oneToOne.optimisticlock = takeInConsiderationForOptimisticLock;
 		}
 
 		#endregion
@@ -115,12 +116,30 @@ namespace NHibernate.Mapping.ByCode.Impl
 			}
 		}
 
+		public void Formulas(params string[] formulas)
+		{
+			if (formulas == null)
+				throw new ArgumentNullException(nameof(formulas));
+
+			_oneToOne.formula1 = null;
+			_oneToOne.formula =
+				formulas
+					.ToArray(
+						f => new HbmFormula {Text = f.Split(StringHelper.LineSeparators, StringSplitOptions.None)});
+		}
+
 		public void ForeignKey(string foreignKeyName)
 		{
 			_oneToOne.foreignkey = foreignKeyName;
 		}
 
 		#endregion
+
+		public void Fetch(FetchKind fetchMode)
+		{
+			_oneToOne.fetch = fetchMode.ToHbm();
+			_oneToOne.fetchSpecified = true;
+		}
 	}
 
 	public class OneToOneMapper<T> : OneToOneMapper, IOneToOneMapper<T>

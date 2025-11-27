@@ -1,5 +1,4 @@
 using NHibernate.Cfg;
-using NHibernate.Linq;
 using NUnit.Framework;
 using System;
 using System.Collections.Generic;
@@ -14,7 +13,6 @@ namespace NHibernate.Test.NHSpecificTest.NH2583
 			public const int BatchSize = 200;
 			protected override void Configure(Configuration configuration)
 			{
-				base.Configure(configuration);
 				configuration.DataBaseIntegration(x => x.BatchSize = BatchSize+5);
 				List<string> cacheSettings = new List<string>(configuration.Properties.Keys.Where(x => x.Contains("cache")));
 				foreach (var cacheSetting in cacheSettings)
@@ -22,9 +20,8 @@ namespace NHibernate.Test.NHSpecificTest.NH2583
 					configuration.Properties.Remove(cacheSetting);
 				}
 				configuration.SetProperty(Environment.UseSecondLevelCache, "false");
-
 			}
-        private class ValueTuple<T1, T2, T3, T4, T5, T6, T7>
+		private class ValueTuple<T1, T2, T3, T4, T5, T6, T7>
         {
             public T1 Item1;
             public T2 Item2;
@@ -131,7 +128,6 @@ namespace NHibernate.Test.NHSpecificTest.NH2583
 								return TestAndAssert(condition, session, expectedIds);
 							}
 						}
-
 					}
 					finally
 					{
@@ -237,9 +233,9 @@ namespace NHibernate.Test.NHSpecificTest.NH2583
 							}
 							if ((i%BatchSize) == 0)
 							{
-								if (session.Transaction.IsActive)
+								if (session.GetCurrentTransaction()?.IsActive == true)
 								{
-									session.Transaction.Commit();
+									session.GetCurrentTransaction().Commit();
 									session.Clear();
 								}
 								session.BeginTransaction();
@@ -253,9 +249,9 @@ namespace NHibernate.Test.NHSpecificTest.NH2583
 							// emulating the outer-join logic for exceptional cases in Lin2Objects is IMO very hard.
 						}
 					}
-					if (session.Transaction.IsActive)
+					if (session.GetCurrentTransaction()?.IsActive == true)
 					{
-						session.Transaction.Commit();
+						session.GetCurrentTransaction().Commit();
 						session.Clear();
 					}
 

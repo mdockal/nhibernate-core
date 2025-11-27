@@ -68,7 +68,7 @@ namespace NHibernate.Proxy.DynamicProxy
 			IL.MarkLabel(skipBaseCall);
 
 			// Push arguments for InvocationInfo constructor.
-			IL.Emit(OpCodes.Ldarg_0);  // 'this' pointer
+			IL.Emit(OpCodes.Ldarg_0); // 'this' pointer
 			PushTargetMethodInfo(IL, proxyMethod, method);
 			PushTargetMethodInfo(IL, callbackMethod, callbackMethod);
 			PushStackTrace(IL);
@@ -94,13 +94,34 @@ namespace NHibernate.Proxy.DynamicProxy
 
 		private static void EmitBaseMethodCall(ILGenerator IL, MethodInfo method)
 		{
-			IL.Emit(OpCodes.Ldarg_0);
+			if (method.IsAbstract)
+			{
+				if (!method.ReturnType.IsValueType)
+				{
+					IL.Emit(OpCodes.Ldnull);
+				}
+				else if (method.ReturnType != typeof(void))
+				{
+					var local = IL.DeclareLocal(method.ReturnType);
+					IL.Emit(OpCodes.Ldloca, local);
+					IL.Emit(OpCodes.Initobj, method.ReturnType);
+					IL.Emit(OpCodes.Ldloc, local);
+				}
 
-			for (int i = 0; i < method.GetParameters().Length; i++)
-				IL.Emit(OpCodes.Ldarg_S, (sbyte) (i + 1));
+				IL.Emit(OpCodes.Ret);
+			}
+			else
+			{
+				IL.Emit(OpCodes.Ldarg_0);
 
-			IL.Emit(OpCodes.Call, method);
-			IL.Emit(OpCodes.Ret);
+				for (int i = 0; i < method.GetParameters().Length; i++)
+				{
+					IL.Emit(OpCodes.Ldarg_S, (sbyte) (i + 1));
+				}
+
+				IL.Emit(OpCodes.Call, method);
+				IL.Emit(OpCodes.Ret);
+			}
 		}
 
 		private static void SaveRefArguments(ILGenerator IL, ParameterInfo[] parameters)

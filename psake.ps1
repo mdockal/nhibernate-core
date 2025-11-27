@@ -14,8 +14,13 @@ Task Set-Configuration {
             'connection.driver_class' = 'NHibernate.Driver.FirebirdClientDriver';
             'dialect' = 'NHibernate.Dialect.FirebirdDialect'
         };
+        'Firebird4' = @{
+            'connection.connection_string' = 'DataSource=localhost;Database=nhibernate;User ID=SYSDBA;Password=masterkey;MaxPoolSize=200;';
+            'connection.driver_class' = 'NHibernate.Driver.FirebirdClientDriver';
+            'dialect' = 'NHibernate.Dialect.Firebird4Dialect'
+        };
         'MySQL' = @{
-            'connection.connection_string' = 'Server=127.0.0.1;Uid=root;Pwd=Password12!;Database=nhibernate;Old Guids=True;';
+            'connection.connection_string' = 'Server=127.0.0.1;Uid=root;Pwd=Password12!;Database=nhibernate;Old Guids=True;SslMode=none;';
             'connection.driver_class' = 'NHibernate.Driver.MySqlDataDriver';
             'dialect' = 'NHibernate.Dialect.MySQL5Dialect'
         };
@@ -24,6 +29,8 @@ Task Set-Configuration {
             'connection.connection_string' = 'Server=(local)\SQL2017;Uid=sa;Pwd=Password12!;Database=nhibernateOdbc;Driver={SQL Server Native Client 11.0};Mars_Connection=yes;';
             'connection.driver_class' = 'NHibernate.Driver.OdbcDriver';
             'odbc.explicit_datetime_scale' = '3';
+            'transaction.ignore_session_synchronization_failures' = 'true';
+            'transaction.system_completion_lock_timeout' = '200';
             <# We need to use a dialect that avoids mapping DbType.Time to TIME on MSSQL. On modern SQL Server
                 this becomes TIME(7). Later, such values cannot be read back over ODBC. The
                 error we get is "System.ArgumentException : Unknown SQL type - SS_TIME_EX.". I don't know for certain
@@ -58,10 +65,28 @@ Task Set-Configuration {
         };
         'SqlServer2008' = @{
             'connection.connection_string' = 'Server=(local)\SQL2017;User ID=sa;Password=Password12!;initial catalog=nhibernate;'
+            'connection.driver_class' = 'NHibernate.Driver.Sql2008ClientDriver';
+            'dialect' = 'NHibernate.Dialect.MsSql2008Dialect'
         };
         'SqlServer2012' = @{
             'connection.connection_string' = 'Server=(local)\SQL2017;User ID=sa;Password=Password12!;initial catalog=nhibernate;';
+            'connection.driver_class' = 'NHibernate.Driver.Sql2008ClientDriver';
             'dialect' = 'NHibernate.Dialect.MsSql2012Dialect'
+        };
+        'SqlServer2008-MicrosoftDataSqlClientDriver' = @{
+            'connection.connection_string' = 'Server=(local)\SQL2017;User ID=sa;Password=Password12!;initial catalog=nhibernate;'
+            'connection.driver_class' = 'NHibernate.Driver.MicrosoftDataSqlClientDriver';
+            'dialect' = 'NHibernate.Dialect.MsSql2008Dialect'
+        };
+        'SqlServer2012-MicrosoftDataSqlClientDriver' = @{
+            'connection.connection_string' = 'Server=(local)\SQL2017;User ID=sa;Password=Password12!;initial catalog=nhibernate;';
+            'connection.driver_class' = 'NHibernate.Driver.MicrosoftDataSqlClientDriver';
+            'dialect' = 'NHibernate.Dialect.MsSql2012Dialect'
+        };
+        'Oracle' = @{
+            'connection.connection_string' = 'User ID=nhibernate;Password=nhibernate;Metadata Pooling=false;Self Tuning=false;Data Source=(DESCRIPTION = (ADDRESS = (PROTOCOL = TCP)(HOST = localhost)(PORT = 1521)) (CONNECT_DATA = (SERVER = DEDICATED) (SERVICE_NAME = XEPDB1)))';
+            'connection.driver_class' = 'NHibernate.Driver.OracleManagedDataClientDriver';
+            'dialect' = 'NHibernate.Dialect.Oracle10gDialect'
         }
     }
     #Settings for current build
@@ -96,9 +121,8 @@ Task Set-Configuration {
 
 Task Build {
     Exec { 
-        dotnet `
-            build ./src/NHibernate.sln `
-            -c Release
+        dotnet build ./src/NHibernate/NHibernate.csproj -m:1 -c Release
+        dotnet build ./src/NHibernate.sln -c Release
     }
 }
 
@@ -108,7 +132,7 @@ Task Test -depends Build {
         'NHibernate.Test',
         'NHibernate.Test.VisualBasic'
     ) | ForEach-Object { 
-        $assembly = [IO.Path]::Combine("src", $_, "bin", "Release", "netcoreapp2.0", "$_.dll")
+        $assembly = [IO.Path]::Combine("src", $_, "bin", "Release", "net8.0", "$_.dll")
         Exec {
             dotnet $assembly --labels=before --nocolor "--result=$_-TestResult.xml"
         }

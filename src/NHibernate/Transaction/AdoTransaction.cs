@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
+using NHibernate.Driver;
 using NHibernate.Engine;
 using NHibernate.Impl;
 
@@ -22,8 +23,8 @@ namespace NHibernate.Transaction
 		private bool commitFailed;
 		// Since v5.2
 		[Obsolete]
-		private IList<ISynchronization> synchronizations;
-		private IList<ITransactionCompletionSynchronization> _completionSynchronizations;
+		private List<ISynchronization> synchronizations;
+		private List<ITransactionCompletionSynchronization> _completionSynchronizations;
 
 		/// <summary>
 		/// Initializes a new instance of the <see cref="AdoTransaction"/> class.
@@ -80,10 +81,62 @@ namespace NHibernate.Transaction
 
 				// If you try to assign a disposed transaction to a command with MSSQL, it will leave the command's
 				// transaction as null and not throw an error.  With SQLite, for example, it will throw an exception
-				// here instead.  Because of this, we set the trans field to null in when Dispose is called.
+				// here instead.  Because of this, we set the trans field to null when Dispose is called.
 				command.Transaction = trans;
 			}
 		}
+
+#if NET6_0_OR_GREATER
+		/// <summary>
+		/// Enlist a <see cref="DbBatch"/> in the current <see cref="ITransaction"/>.
+		/// </summary>
+		/// <param name="batch">The <see cref="DbBatch"/> to enlist in this Transaction.</param>
+		/// <remarks>
+		/// <para>
+		/// This takes care of making sure the <see cref="DbBatch"/>'s Transaction property 
+		/// contains the correct <see cref="DbTransaction"/> or <see langword="null" /> if there is no
+		/// Transaction for the ISession - ie <c>BeginTransaction()</c> not called.
+		/// </para>
+		/// <para>
+		/// This method may be called even when the transaction is disposed.
+		/// </para>
+		/// </remarks>
+		public void Enlist(DbBatch batch)
+		{
+			if (trans == null)
+			{
+				if (log.IsWarnEnabled())
+				{
+					if (batch.Transaction != null)
+					{
+						log.Warn("set a nonnull DbBatch.Transaction to null because the Session had no Transaction");
+					}
+				}
+
+				batch.Transaction = null;
+				return;
+			}
+			else
+			{
+				if (log.IsWarnEnabled())
+				{
+					// got into here because the command was being initialized and had a null Transaction - probably
+					// don't need to be confused by that - just a normal part of initialization...
+					if (batch.Transaction != null && batch.Transaction != trans)
+					{
+						log.Warn("The DbBatch had a different Transaction than the Session.  This can occur when " +
+								 "Disconnecting and Reconnecting Sessions because the PreparedCommand Cache is Session specific.");
+					}
+				}
+				log.Debug("Enlist DbBatch");
+
+				// If you try to assign a disposed transaction to a command with MSSQL, it will leave the command's
+				// transaction as null and not throw an error.  With SQLite, for example, it will throw an exception
+				// here instead.  Because of this, we set the trans field to null when Dispose is called.
+				batch.Transaction = trans;
+			}
+		}
+#endif
 
 		// Since 5.2
 		[Obsolete("Use RegisterSynchronization(ITransactionCompletionSynchronization) instead")]
@@ -146,14 +199,7 @@ namespace NHibernate.Transaction
 
 				try
 				{
-					if (isolationLevel == IsolationLevel.Unspecified)
-					{
-						trans = session.Connection.BeginTransaction();
-					}
-					else
-					{
-						trans = session.Connection.BeginTransaction(isolationLevel);
-					}
+					trans = session.Factory.ConnectionProvider.Driver.BeginTransaction(isolationLevel, session.Connection);
 				}
 				catch (HibernateException)
 				{
@@ -252,7 +298,7 @@ namespace NHibernate.Transaction
 		/// </exception>
 		public void Rollback()
 		{
-			using (new SessionIdLoggingContext(sessionId))
+			using (SessionIdLoggingContext.CreateOrNull(sessionId))
 			{
 				CheckNotDisposed();
 				CheckBegun();
@@ -369,37 +415,47 @@ namespace NHibernate.Transaction
 		/// </remarks>
 		protected virtual void Dispose(bool isDisposing)
 		{
-			using (new SessionIdLoggingContext(sessionId))
+			using (SessionIdLoggingContext.CreateOrNull(sessionId))
 			{
 				if (_isAlreadyDisposed)
 				{
 					// don't dispose of multiple times.
 					return;
 				}
+				_isAlreadyDisposed = true;
 
 				// free managed resources that are being managed by the AdoTransaction if we
 				// know this call came through Dispose()
 				if (isDisposing)
 				{
-					if (trans != null)
+					try
 					{
-						trans.Dispose();
-						trans = null;
-						log.Debug("DbTransaction disposed.");
-					}
+						if (trans != null)
+						{
+							trans.Dispose();
+							trans = null;
+							log.Debug("DbTransaction disposed.");
+						}
 
-					if (IsActive && session != null)
+						if (IsActive)
+						{
+							// Assume we are rolled back
+							rolledBack = true;
+							if (session != null)
+								AfterTransactionCompletion(false);
+						}
+						// nothing for Finalizer to do - so tell the GC to ignore it
+						GC.SuppressFinalize(this);
+					}
+					finally
 					{
-						// Assume we are rolled back
-						AfterTransactionCompletion(false);
+						// Do not leave the object in an inconsistent state in case of disposal failure: we should assume
+						// the DbTransaction is either no more ongoing or unrecoverable.
+						begun = false;
 					}
 				}
 
 				// free unmanaged resources here
-
-				_isAlreadyDisposed = true;
-				// nothing for Finalizer to do - so tell the GC to ignore it
-				GC.SuppressFinalize(this);
 			}
 		}
 

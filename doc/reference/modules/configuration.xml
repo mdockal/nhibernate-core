@@ -433,6 +433,45 @@ var session = sessions.OpenSession(conn);
 
     </sect1>
 
+    <sect1 id="configuration-provider">
+        <title>Using a custom configuration provider</title>
+
+        <para>
+            By default, NHibernate attempts to read the <literal>hibernate-configuration</literal> section
+            through the .Net <literal>ConfigurationManager</literal>. Some environments do not support it, so
+            NHibernate provides a way to set a custom configuration provider, through the
+            <literal>NHibernate.Cfg.ConfigurationProvider.Current</literal> property.
+        </para>
+
+        <para>
+            To disable the configuration provider, in case you configure NHibernate entirely programmatically,
+            set this property to <literal>null</literal>.
+        </para>
+
+        <programlisting><![CDATA[ConfigurationProvider.Current = null;]]></programlisting>
+
+        <para>
+            To provide directly the <literal>System.Configuration.Configuration</literal> instance to use, assign
+            the <literal>Current</literal> property with an instance of
+            <literal>NHibernate.Cfg.SystemConfigurationProvider</literal> built with your
+            <literal>Configuration</literal> instance.
+        </para>
+
+        <programlisting><![CDATA[ConfigurationProvider.Current = new SystemConfigurationProvider(yourConfig);]]></programlisting>
+
+        <para>
+            You may also derive a custom provider from <literal>NHibernate.Cfg.ConfigurationProvider</literal>,
+            implements its abstract methods, and assign an instance of your custom provider to the
+            <literal>NHibernate.Cfg.ConfigurationProvider.Current</literal> property.
+        </para>
+
+        <para>
+            Changes of the <literal>ConfigurationProvider.Current</literal> property value are to be done very
+            early in the application lifecycle, before any other call on a NHibernate API. Otherwise they
+            may not be taken into account.
+        </para>
+    </sect1>
+
     <sect1 id="configuration-optional">
         <title>Optional configuration properties</title>
         
@@ -573,6 +612,26 @@ var session = sessions.OpenSession(conn);
                     </row>
                     <row>
                         <entry>
+                            <literal>cache.read_write_lock_factory</literal>
+                        </entry>
+                        <entry>
+                            Specify the cache lock factory to use for read-write cache regions.
+                            Defaults to the built-in <literal>async</literal> cache lock factory.
+                            <para>
+                                <emphasis role="strong">eg.</emphasis>
+                                <literal>async</literal>, or <literal>sync</literal>, or <literal>classname.of.CacheLockFactory, assembly</literal> with custom implementation of <literal>ICacheReadWriteLockFactory</literal>
+                            </para>
+                            <para>
+                                <literal>async</literal> uses a single writer multiple readers locking mechanism supporting asynchronous operations.
+                            </para>
+                            <para>
+                                <literal>sync</literal> uses a single access locking mechanism which will throw on asynchronous
+                                operations but may have better performances than the <literal>async</literal> provider for applications using the .Net Framework (4.8 and below).
+                            </para>
+                        </entry>
+                    </row>
+                    <row>
+                        <entry>
                             <literal>cache.region_prefix</literal>
                         </entry>
                         <entry>
@@ -665,6 +724,24 @@ var session = sessions.OpenSession(conn);
                     </row>
                     <row>
                         <entry>
+                            <literal>query.throw_never_cached</literal>
+                        </entry>
+                        <entry>
+                            Should queries set as cacheable raise an error if they reference an entity using the cache
+                            <xref linkend="performance-cache-never" /> (the default is enabled).
+                            <para>
+                                <emphasis role="strong">eg.</emphasis>
+                                <literal>true</literal> | <literal>false</literal>
+                            </para>
+                            <para>
+                                Disabling this setting causes NHibernate to ignore the caching of such queries without
+                                raising an error. Furthermore NHibernate will log a warning on cacheable queries
+                                referencing an entity using the <literal>never</literal> cache strategy.
+                            </para>
+                        </entry>
+                    </row>
+                    <row>
+                        <entry>
                             <literal>query.factory_class</literal>
                         </entry>
                         <entry>
@@ -705,6 +782,19 @@ var session = sessions.OpenSession(conn);
                     </row>
                     <row>
                         <entry>
+                            <literal>query.pre_transformer_registrar</literal>
+                        </entry>
+                        <entry>
+                            The class name of the LINQ query pre-transformer registrar, implementing
+                            <literal>IExpressionTransformerRegistrar</literal>. Defaults to <literal>null</literal> (no registrar).
+                            <para>
+                                <emphasis role="strong">eg.</emphasis>
+                                <literal>classname.of.ExpressionTransformerRegistrar, assembly</literal>
+                            </para>
+                        </entry>
+                    </row>
+                    <row>
+                        <entry>
                             <literal>linqtohql.generatorsregistry</literal>
                         </entry>
                         <entry>
@@ -719,6 +809,57 @@ var session = sessions.OpenSession(conn);
                     </row>
                     <row>
                         <entry>
+                            <literal>linqtohql.legacy_preevaluation</literal>
+                        </entry>
+                        <entry>
+                            Whether to use the legacy pre-evaluation or not in Linq queries. Defaults to <literal>true</literal>.
+                            <para>
+                                <emphasis role="strong">eg.</emphasis>
+                                <literal>true</literal> | <literal>false</literal>
+                            </para>
+                            <para>
+                                Legacy pre-evaluation is causing special properties or functions like <literal>DateTime.Now</literal>
+                                or <literal>Guid.NewGuid()</literal> to be always evaluated with the .Net runtime and replaced in the
+                                query by parameter values.
+                            </para>
+                            <para>
+                                The new pre-evaluation allows them to be converted to HQL function calls which will be run on the db
+                                side. This allows for example to retrieve the server time instead of the client time, or to generate
+                                UUIDs for each row instead of an unique one for all rows.
+                            </para>
+                            <para>
+                                The new pre-evaluation will likely be enabled by default in the next major version (6.0).
+                            </para>
+                        </entry>
+                    </row>
+                    <row>
+                        <entry>
+                            <literal>linqtohql.fallback_on_preevaluation</literal>
+                        </entry>
+                        <entry>
+                            When the new pre-evaluation is enabled, should methods which translation is not supported by the current
+                            dialect fallback to pre-evaluation? Defaults to <literal>false</literal>.
+                            <para>
+                                <emphasis role="strong">eg.</emphasis>
+                                <literal>true</literal> | <literal>false</literal>
+                            </para>
+                            <para>
+                                When this fallback option is enabled while legacy pre-evaluation is disabled, properties or functions
+                                like <literal>DateTime.Now</literal> or <literal>Guid.NewGuid()</literal> used in Linq expressions
+                                will not fail when the dialect does not support them, but will instead be pre-evaluated.
+                            </para>
+                            <para>
+                                When this fallback option is disabled while legacy pre-evaluation is disabled, properties or functions
+                                like <literal>DateTime.Now</literal> or <literal>Guid.NewGuid()</literal> used in Linq expressions
+                                will fail when the dialect does not support them.
+                            </para>
+                            <para>
+                                This option has no effect if the legacy pre-evaluation is enabled.
+                            </para>
+                        </entry>
+                    </row>
+                    <row>
+                        <entry>
                             <literal>sql_exception_converter</literal>
                         </entry>
                         <entry>
@@ -727,6 +868,20 @@ var session = sessions.OpenSession(conn);
                             <para>
                                 <emphasis role="strong">eg.</emphasis>
                                 <literal>classname.of.SQLExceptionConverter, assembly</literal>
+                            </para>
+                        </entry>
+                    </row>
+                    <row>
+                        <entry>
+                            <literal>escape_backslash_in_strings</literal>
+                        </entry>
+                        <entry>
+                            Indicates if the database needs to have backslash escaped in string literals.
+                            The default value is dialect dependant. That is <literal>false</literal> for
+                            most dialects.
+                            <para>
+                                <emphasis role="strong">eg.</emphasis> 
+                                <literal>true</literal> | <literal>false</literal>
                             </para>
                         </entry>
                     </row>
@@ -778,7 +933,7 @@ var session = sessions.OpenSession(conn);
                             is closed explicitly.
                             <para>
                                 <emphasis role="strong">eg.</emphasis> 
-                                <literal>create</literal> | <literal>create-drop</literal>
+                                <literal>create</literal> | <literal>create-drop</literal> | <literal>update</literal> | <literal>validate</literal>
                             </para>
                         </entry>
                     </row>
@@ -804,6 +959,20 @@ var session = sessions.OpenSession(conn);
                             <para>
                                 <emphasis role="strong">eg.</emphasis>
                                 <literal>none</literal> | <literal>keywords</literal> | <literal>auto-quote</literal>
+                            </para>
+                        </entry>
+                    </row>
+                    <row>
+                        <entry>
+                            <literal>hbm2ddl.throw_on_update</literal>
+                        </entry>
+                        <entry>
+                            When <literal>hbm2ddl.auto</literal> is <literal>update</literal>, whether to throw or not on schema auto-update failures.
+                            <!-- 6.0 TODO: should become true by default. -->
+                            Disabled by default.
+                            <para>
+                                <emphasis role="strong">eg.</emphasis> 
+                                <literal>true</literal> | <literal>false</literal>
                             </para>
                         </entry>
                     </row>
@@ -895,13 +1064,59 @@ var session = sessions.OpenSession(conn);
                                 after scope disposal. This occurs when the transaction is distributed.
                                 This notably concerns <literal>ISessionImplementor.AfterTransactionCompletion(bool, ITransaction)</literal>.
                                 NHibernate protects the session from being concurrently used by the code following the scope disposal
-                                with a lock. To prevent any application freeze, this lock has a default timeout of five seconds. If the
-                                application appears to require longer (!) running transaction completion events, this setting allows to
+                                with a lock. To prevent any application freeze, this lock has a default timeout of one second. If the
+                                application appears to require longer running transaction completion events, this setting allows to
                                 raise this timeout. <literal>-1</literal> disables the timeout.
                             </para>
                             <para>
                                 <emphasis role="strong">eg.</emphasis>
                                 <literal>10000</literal>
+                            </para>
+                        </entry>
+                    </row>
+                    <row>
+                        <entry>
+                            <literal>transaction.ignore_session_synchronization_failures</literal>
+                        </entry>
+                        <entry>
+                            Whether session synchronisation failures occuring during finalizations of system transaction should be
+                            ignored or not. <literal>false</literal> by default.
+                            <para>
+                                When a system transaction terminates abnormaly, especially through timeouts, it may have its
+                                completion events running on concurrent threads while the session is still performing some processing.
+                                To prevent threading concurrency failures, NHibernate then wait for the session to end its processing,
+                                up to <literal>transaction.system_completion_lock_timeout</literal>. If the session processing is still ongoing
+                                afterwards, it will by default log an error, perform transaction finalization processing concurrently,
+                                then throw a synchronization error. This setting allows to disable that later throw.
+                            </para>
+                            <para>
+                                Disabling the throw can be useful if the used data provider has its own locking mechanism applied
+                                during transaction completion, preventing the session to end its processing. It may then be safe to
+                                ignore this synchronization failure. In case of threading concurrency failure, you may then need to
+                                raise <literal>transaction.system_completion_lock_timeout</literal>.
+                            </para>
+                            <para>
+                                <emphasis role="strong">eg.</emphasis>
+                                <literal>true</literal> | <literal>false</literal>
+                            </para>
+                        </entry>
+                    </row>
+                    <row>
+                        <entry>
+                            <literal>transaction.auto_join</literal>
+                        </entry>
+                        <entry>
+                            Should sessions check on every operation whether there is an ongoing system transaction or not, and enlist
+                            into it if any?
+                            <para>
+                                Default is <literal>true</literal>. It can also be controlled at session opening, with
+                                <literal>ISessionFactory.WithOptions</literal>. A session can also be instructed to explicitly join the current
+                                transaction by calling <literal>ISession.JoinTransaction</literal>. This setting has no effect when using a
+                                transaction factory that is not system transactions aware.
+                            </para>
+                            <para>
+                                <emphasis role="strong">eg.</emphasis>
+                                <literal>false</literal>
                             </para>
                         </entry>
                     </row>
@@ -1061,6 +1276,58 @@ var session = sessions.OpenSession(conn);
                     </row>
                     <row>
                         <entry>
+                            <literal>oracle.use_binary_floating_point_types</literal>
+                        </entry>
+                        <entry>
+                            <para>
+                                Set whether NHibernate should map .Net <literal>double</literal> and <literal>float</literal>
+                                to Oracle <literal>BINARY_DOUBLE</literal> and <literal>BINARY_FLOAT</literal> types or use
+                                Oracle <literal>DOUBLE</literal> and <literal>FLOAT</literal> types.
+                            </para>
+                            <para>
+                                Oracle 10g introduced <literal>BINARY_DOUBLE</literal> and <literal>BINARY_FLOAT</literal>
+                                types which are compatible with .NET <literal>double</literal> and <literal>float</literal>
+                                types, while Oracle <literal>DOUBLE</literal> and <literal>FLOAT</literal> are not. Oracle
+                                <literal>DOUBLE</literal> and <literal>FLOAT</literal> types do not conform to the IEEE
+                                standard as they are internally implemented as <literal>NUMBER</literal> type, which
+                                makes them an exact numeric type.
+                            </para>
+                            <para>
+                                <emphasis role="strong">eg.</emphasis>
+                                <literal>true</literal> for using Oracle <literal>BINARY_DOUBLE</literal> and
+                                <literal>BINARY_FLOAT</literal> types | <literal>false</literal> for using Oracle
+                                <literal>DOUBLE</literal> and <literal>FLOAT</literal> types.
+                            </para>
+                            <para>
+                                <literal>false</literal> by default. See
+                                <ulink url="https://docs.oracle.com/database/121/TTSQL/types.htm#TTSQL126">ANSI SQL data types</ulink>.
+                            </para>
+                        </entry>
+                    </row>
+                    <row>
+                        <entry>
+                            <literal>oracle.suppress_decimal_invalid_cast_exception</literal>
+                        </entry>
+                        <entry>
+                            <para>
+                                This setting specifies whether to suppress or not the <literal>InvalidCastException</literal>
+                                and return a rounded-off 28 precision value if the Oracle <literal>NUMBER</literal> value
+                                has more than a 28 precision.
+                            </para>
+                            <para>
+                                <emphasis role="strong">eg.</emphasis>
+                                <literal>true</literal> for suppressing the exception | <literal>false</literal> for letting
+                                the exception be raised.
+                            </para>
+                            <para>
+                                <literal>false</literal> by default. See
+                                <ulink url="https://docs.oracle.com/en/database/oracle/oracle-data-access-components/19.3/odpnt/DataReaderSuppressGetDecimalInvalidCastException.html">SuppressGetDecimalInvalidCastException</ulink>.
+                                This setting works only with ODP.NET 19.10 or newer.
+                            </para>
+                        </entry>
+                    </row>
+                    <row>
+                        <entry>
                             <literal>odbc.explicit_datetime_scale</literal>
                         </entry>
                         <entry>
@@ -1079,6 +1346,20 @@ in the parameter binding.</programlisting>
                                 <emphasis role="strong">eg.</emphasis>
                                 <literal>3</literal>
                             </para>
+                        </entry>
+                    </row>
+                    <row>
+                        <entry>
+                            <literal>sqlite.binaryguid</literal>
+                        </entry>
+                        <entry>
+                            SQLite can store GUIDs in binary or text form, controlled by the BinaryGuid
+                            connection string parameter (default is 'true'). The BinaryGuid setting will affect
+                            how to cast GUID to string in SQL. NHibernate will attempt to detect this
+                            setting automatically from the connection string, but if the connection
+                            or connection string is being handled by the application instead of by NHibernate,
+                            you can use the <literal>sqlite.binaryguid</literal> NHibernate setting to override the behavior.
+                            The value can be <literal>true</literal> or <literal>false</literal>.
                         </entry>
                     </row>
                     <row>
@@ -1276,12 +1557,6 @@ in the parameter binding.</programlisting>
                             <entry></entry>
                         </row>
                         <row>
-                            <entry>PostgreSQL</entry>
-                            <entry><literal>NHibernate.Dialect.PostgreSQLDialect</literal></entry>
-                            <entry>
-                            </entry>
-                        </row>
-                        <row>
                             <entry>PostgreSQL 8.1</entry>
                             <entry><literal>NHibernate.Dialect.PostgreSQL81Dialect</literal></entry>
                             <entry>
@@ -1329,6 +1604,11 @@ in the parameter binding.</programlisting>
                         <row>
                             <entry>Sybase Adaptive Server Enterprise 15</entry>
                             <entry><literal>NHibernate.Dialect.SybaseASE15Dialect</literal></entry>
+                            <entry></entry>
+                        </row>
+                        <row>
+                            <entry>Sybase Adaptive Server Enterprise 16</entry>
+                            <entry><literal>NHibernate.Dialect.SybaseASE16Dialect</literal></entry>
                             <entry></entry>
                         </row>
                         <row>
@@ -1488,7 +1768,7 @@ in the parameter binding.</programlisting>
                                     Use the assembly qualified class name of a custom <literal>IObjectsFactory</literal>
                                     implementation.
                                 </para>
-                                <programlisting><![CDATA[<bytecode-provider
+                                <programlisting><![CDATA[<objects-factory
     type="className" />]]></programlisting>
                                 <para>
                                     You can also set this property by code by setting

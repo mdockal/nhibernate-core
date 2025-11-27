@@ -68,9 +68,9 @@ namespace NHibernate.Hql.Ast.ANTLR.Exec
 			{
 				IIsolatedWork work = new TmpIdTableDropIsolatedWork(persister, log, session);
 
-				if (ShouldIsolateTemporaryTableDDL())
+				if (ShouldIsolateTemporaryTableDDL() && session.ConnectionManager.CurrentTransaction != null)
 				{
-					session.ConnectionManager.Transaction.RegisterSynchronization(
+					session.ConnectionManager.CurrentTransaction.RegisterSynchronization(
 						new IsolatedWorkAfterTransaction(work, session));
 				}
 				else
@@ -162,7 +162,7 @@ namespace NHibernate.Hql.Ast.ANTLR.Exec
 				{
 					stmnt = connection.CreateCommand();
 					stmnt.Transaction = transaction;
-					stmnt.CommandText = "drop table " + persister.TemporaryIdTableName;
+					stmnt.CommandText = $"{session.Factory.Dialect.DropTemporaryTableString} {persister.TemporaryIdTableName}";
 					await (stmnt.ExecuteNonQueryAsync(cancellationToken)).ConfigureAwait(false);
 					session.Factory.Settings.SqlStatementLogger.LogCommand(stmnt, FormatStyle.Ddl);
 				}

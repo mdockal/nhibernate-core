@@ -24,13 +24,12 @@ namespace NHibernate.Test.ConnectionTest
 	[TestFixture]
 	public class AggressiveReleaseTestAsync : ConnectionManagementTestCase
 	{
-		protected override void Configure(Configuration cfg)
+		protected override void Configure(Configuration configuration)
 		{
-			base.Configure(cfg);
-			cfg.SetProperty(Environment.ReleaseConnections, "after_transaction");
-			//cfg.SetProperty(Environment.ConnectionProvider, typeof(DummyConnectionProvider).AssemblyQualifiedName);
-			//cfg.SetProperty(Environment.GenerateStatistics, "true");
-			cfg.SetProperty(Environment.BatchSize, "0");
+			configuration.SetProperty(Environment.ReleaseConnections, "after_transaction");
+			//configuration.SetProperty(Environment.ConnectionProvider, typeof(DummyConnectionProvider).AssemblyQualifiedName);
+			//configuration.SetProperty(Environment.GenerateStatistics, "true");
+			configuration.SetProperty(Environment.BatchSize, "0");
 		}
 
 		protected override ISession GetSessionUnderTest()
@@ -230,30 +229,31 @@ namespace NHibernate.Test.ConnectionTest
 		{
 			Prepare();
 			ISession s = GetSessionUnderTest();
-			s.BeginTransaction();
-
-			IList<Silly> entities = new List<Silly>();
-			for (int i = 0; i < 10; i++)
+			using (var t = s.BeginTransaction())
 			{
-				Other other = new Other("other-" + i);
-				Silly silly = new Silly("silly-" + i, other);
-				entities.Add(silly);
-				await (s.SaveAsync(silly));
-			}
-			await (s.FlushAsync());
+				IList<Silly> entities = new List<Silly>();
+				for (int i = 0; i < 10; i++)
+				{
+					Other other = new Other("other-" + i);
+					Silly silly = new Silly("silly-" + i, other);
+					entities.Add(silly);
+					await (s.SaveAsync(silly));
+				}
+				await (s.FlushAsync());
 
-			foreach (Silly silly in entities)
-			{
-				silly.Name = "new-" + silly.Name;
-				silly.Other.Name = "new-" + silly.Other.Name;
-			}
-//			long initialCount = sessions.Statistics.getConnectCount();
-			await (s.FlushAsync());
-//			Assert.AreEqual(initialCount + 1, sessions.Statistics.getConnectCount(), "connection not maintained through Flush");
+				foreach (Silly silly in entities)
+				{
+					silly.Name = "new-" + silly.Name;
+					silly.Other.Name = "new-" + silly.Other.Name;
+				}
+				// long initialCount = sessions.Statistics.getConnectCount();
+				await (s.FlushAsync());
+				//Assert.AreEqual(initialCount + 1, sessions.Statistics.getConnectCount(), "connection not maintained through Flush");
 
-			await (s.DeleteAsync("from Silly"));
-			await (s.DeleteAsync("from Other"));
-			await (s.Transaction.CommitAsync());
+				await (s.DeleteAsync("from Silly"));
+				await (s.DeleteAsync("from Other"));
+				await (t.CommitAsync());
+			}
 			Release(s);
 			Done();
 		}

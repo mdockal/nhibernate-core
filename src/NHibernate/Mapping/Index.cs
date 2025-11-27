@@ -14,7 +14,7 @@ namespace NHibernate.Mapping
 	public class Index : IRelationalModel
 	{
 		private Table table;
-		private readonly List<Column> columns = new List<Column>();
+		private readonly List<Column> columns = new List<Column>(1);
 		private string name;
 
 		public static string BuildSqlCreateIndexString(Dialect.Dialect dialect, string name, Table table,
@@ -68,7 +68,8 @@ namespace NHibernate.Mapping
 		/// </returns>
 		public string SqlCreateString(Dialect.Dialect dialect, IMapping p, string defaultCatalog, string defaultSchema)
 		{
-			return BuildSqlCreateIndexString(dialect, Name, Table, ColumnIterator, false, defaultCatalog, defaultSchema);
+			var indexName = IsInherited ? Table.Name + Name : Name;
+			return BuildSqlCreateIndexString(dialect, indexName, Table, ColumnIterator, false, defaultCatalog, defaultSchema);
 		}
 
 		/// <summary>
@@ -143,6 +144,11 @@ namespace NHibernate.Mapping
 			get { return name; }
 			set { name = value; }
 		}
+
+		/// <summary>
+		/// Is this index inherited from the base class mapping 
+		/// </summary>
+		public bool IsInherited { get; set; }
 
 		public bool ContainsColumn(Column column)
 		{

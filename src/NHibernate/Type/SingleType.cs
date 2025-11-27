@@ -1,6 +1,8 @@
 using System;
 using System.Data;
 using System.Data.Common;
+using System.Globalization;
+using System.Numerics;
 using NHibernate.Engine;
 using NHibernate.SqlTypes;
 
@@ -17,25 +19,29 @@ namespace NHibernate.Type
 	[Serializable]
 	public class SingleType : PrimitiveType
 	{
-		/// <summary></summary>
-		public SingleType() : base(SqlTypeFactory.Single)
+		private static readonly object ZeroObject = 0F;
+
+		public SingleType() : this(SqlTypeFactory.Single)
 		{
 		}
 
-		public SingleType(SqlType sqlType) : base(sqlType) {}
-
-		/// <summary></summary>
-		public override string Name
+		/// <summary />
+		public SingleType(SqlType sqlType) : base(sqlType)
 		{
-			get { return "Single"; }
 		}
 
-		private static readonly Single ZERO = 0;
+		/// <summary></summary>
+		public override string Name => "Single";
+
 		public override object Get(DbDataReader rs, int index, ISessionImplementor session)
 		{
 			try
 			{
-				return Convert.ToSingle(rs[index]);
+				return rs[index] switch
+				{
+					BigInteger bi => (float) bi,
+					var v => Convert.ToSingle(v)
+				};
 			}
 			catch (Exception ex)
 			{
@@ -43,26 +49,11 @@ namespace NHibernate.Type
 			}
 		}
 
-		public override object Get(DbDataReader rs, string name, ISessionImplementor session)
-		{
-			try
-			{
-				return Convert.ToSingle(rs[name]);
-			}
-			catch (Exception ex)
-			{
-				throw new FormatException(string.Format("Input string '{0}' was not in the correct format.", rs[name]), ex);
-			}
-		}
-
-		public override System.Type ReturnedClass
-		{
-			get { return typeof(Single); }
-		}
+		public override System.Type ReturnedClass => typeof(Single);
 
 		public override void Set(DbCommand rs, object value, int index, ISessionImplementor session)
 		{
-			rs.Parameters[index].Value = value;
+			rs.Parameters[index].Value = Convert.ToSingle(value);
 		}
 
 		// Since 5.2
@@ -79,19 +70,13 @@ namespace NHibernate.Type
 			return Single.Parse(xml);
 		}
 
-		public override System.Type PrimitiveClass
-		{
-			get { return typeof(Single); }
-		}
+		public override System.Type PrimitiveClass => typeof(Single);
 
-		public override object DefaultValue
-		{
-			get { return ZERO; }
-		}
+		public override object DefaultValue => ZeroObject;
 
 		public override string ObjectToSQLString(object value, Dialect.Dialect dialect)
 		{
-			return value.ToString();
+			return ((float)value).ToString(CultureInfo.InvariantCulture);
 		}
 	}
 }

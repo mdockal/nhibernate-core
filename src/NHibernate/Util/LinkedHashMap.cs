@@ -19,6 +19,8 @@ namespace NHibernate.Util
 	/// </remarks>
 	[DebuggerTypeProxy(typeof(CollectionProxy<>))]
 	[Serializable]
+	// Since 5.6
+	[Obsolete("This class has no more usages and will be removed in a future version.")]
 	public class LinkedHashMap<TKey, TValue> : IDictionary<TKey, TValue>, IDeserializationCallback
 	{
 		[Serializable]
@@ -349,15 +351,12 @@ namespace NHibernate.Util
 
 		private bool RemoveImpl(TKey key)
 		{
-			Entry e;
-			bool result = false;
-			if (entries.TryGetValue(key, out e))
-			{
-				result = entries.Remove(key);
-				version++;
-				RemoveEntry(e);
-			}
-			return result;
+			if (!entries.Remove(key, out var e)) 
+				return false;
+
+			version++;
+			RemoveEntry(e);
+			return true;
 		}
 
 		void IDeserializationCallback.OnDeserialization(object sender)
@@ -691,6 +690,5 @@ namespace NHibernate.Util
 
 			#endregion
 		}
-
 	}
 }

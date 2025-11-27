@@ -27,12 +27,12 @@ namespace NHibernate.Hql.Ast.ANTLR.Tree
 
 		public IASTNode LeftHandOperand
 		{
-			get { return GetChild(0);}
+			get { return GetChild(0); }
 		}
 
 		public IASTNode RightHandOperand
 		{
-			get { return GetChild(1);}
+			get { return GetChild(1); }
 		}
 
 		/// <summary>
@@ -56,24 +56,20 @@ namespace NHibernate.Hql.Ast.ANTLR.Tree
 			IType lhsType = ExtractDataType( lhs );
 			IType rhsType = ExtractDataType( rhs );
 
-			if ( lhsType == null ) 
-			{
+			if (lhsType == null || (IsGuessedType(lhs) && rhsType != null))
 				lhsType = rhsType;
-			}
-			if ( rhsType == null ) 
-			{
+
+			if (rhsType == null || (IsGuessedType(rhs) && lhsType != null))
 				rhsType = lhsType;
+
+			if (lhs is IExpectedTypeAwareNode lshTypeAwareNode && lshTypeAwareNode.ExpectedType == null)
+			{
+				lshTypeAwareNode.ExpectedType = rhsType;
 			}
 
-			var lshExpectedTypeAwareNode = lhs as IExpectedTypeAwareNode;
-			if (lshExpectedTypeAwareNode != null)
+			if (rhs is IExpectedTypeAwareNode rshTypeAwareNode && rshTypeAwareNode.ExpectedType == null)
 			{
-				lshExpectedTypeAwareNode.ExpectedType = rhsType;
-			}
-			var rshExpectedTypeAwareNode = rhs as IExpectedTypeAwareNode;
-			if (rshExpectedTypeAwareNode != null)
-			{
-				rshExpectedTypeAwareNode.ExpectedType = lhsType;
+				rshTypeAwareNode.ExpectedType = lhsType;
 			}
 
 			MutateRowValueConstructorSyntaxesIfNecessary( lhsType, rhsType );
@@ -200,21 +196,21 @@ namespace NHibernate.Hql.Ast.ANTLR.Tree
 			return embeddedParameters.ToArray();
 		}
 
-		private string Translate(int valueElements, string comparisonText, string[] lhsElementTexts, string[] rhsElementTexts)
+		private protected string Translate(int valueElements, string comparisonText, string[] lhsElementTexts, string[] rhsElementTexts)
 		{
-			var multicolumnComparisonClauses = new List<string>();
+			var multicolumnComparisonClauses = new string[valueElements];
 			for (int i = 0; i < valueElements; i++)
 			{
-				multicolumnComparisonClauses.Add(string.Format("{0} {1} {2}", lhsElementTexts[i], comparisonText, rhsElementTexts[i]));
+				multicolumnComparisonClauses[i] = string.Join(" ", lhsElementTexts[i], comparisonText, rhsElementTexts[i]);
 			}
-			return "(" + string.Join(" and ", multicolumnComparisonClauses.ToArray()) + ")";
+			return string.Concat("(", string.Join(" and ", multicolumnComparisonClauses), ")");
 		}
 
-		private static string[] ExtractMutationTexts(IASTNode operand, int count) 
+		private protected static string[] ExtractMutationTexts(IASTNode operand, int count) 
 		{
-			if ( operand is ParameterNode ) 
+			if ( operand is ParameterNode )
 			{
-				return Enumerable.Repeat("?", count).ToArray();
+				return ArrayHelper.Fill("?", count);
 			}
 			if (operand is SqlNode)
 			{
@@ -249,6 +245,8 @@ namespace NHibernate.Hql.Ast.ANTLR.Tree
 			throw new HibernateException( "dont know how to extract row value elements from node : " + operand );
 		}
 
+		private static bool IsGuessedType(IASTNode operand) => TransparentCastNode.IsTransparentCast(operand);
+
 		protected static IType ExtractDataType(IASTNode operand) 
 		{
 			IType type = null;
@@ -276,19 +274,19 @@ namespace NHibernate.Hql.Ast.ANTLR.Tree
 				return;
 			}
 
-			if (rhsNode is IdentNode && lhsNode.DataType is IMetaType lhsNodeMetaType)
+			if (rhsNode is IdentNode && lhsNode.DataType is MetaType lhsNodeMetaType)
 			{
 				EvaluateType(rhsNode, lhsNodeMetaType);
 				return;
 			}
 
-			if (lhsNode is IdentNode && rhsNode.DataType is IMetaType rhsNodeMetaType)
+			if (lhsNode is IdentNode && rhsNode.DataType is MetaType rhsNodeMetaType)
 			{
 				EvaluateType(lhsNode, rhsNodeMetaType);
 			}
 		}
 
-		private void EvaluateType(SqlNode node, IMetaType metaType)
+		private void EvaluateType(SqlNode node, MetaType metaType)
 		{
 			var sessionFactory = SessionFactoryHelper.Factory;
 

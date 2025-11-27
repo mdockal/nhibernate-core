@@ -194,10 +194,10 @@ namespace NHibernate.Test.Criteria
 		[Test]
 		public void MixOfJoinsForAssociatedAndNotAssociatedEntities()
 		{
+#pragma warning disable CS8073 //The result of the expression is always 'false'
 			using (var sqlLog = new SqlLogSpy())
 			using (var session = OpenSession())
 			{
-
 				EntityComplex root = null;
 				EntityComplex ejLevel1 = null;
 				EntitySimpleChild customChildForEjLevel1 = null;
@@ -213,6 +213,7 @@ namespace NHibernate.Test.Criteria
 						.Take(1)
 						.SingleOrDefault<object>();
 			}
+#pragma warning restore CS8073 //The result of the expression is always 'false'
 		}
 
 		[Test]
@@ -238,6 +239,7 @@ namespace NHibernate.Test.Criteria
 		[Test]
 		public void NullLeftEntityJoin()
 		{
+#pragma warning disable CS8073 //The result of the expression is always 'false'
 			using (var sqlLog = new SqlLogSpy())
 			using (var session = OpenSession())
 			{
@@ -253,11 +255,13 @@ namespace NHibernate.Test.Criteria
 				Assert.That(NHibernateUtil.IsInitialized(root), Is.True);
 				Assert.That(sqlLog.Appender.GetEvents().Length, Is.EqualTo(1), "Only one SQL select is expected");
 			}
+#pragma warning restore CS8073 //The result of the expression is always 'false'
 		}	
 		
 		[Test]
 		public void NullLeftEntityJoinWithEntityProjection()
 		{
+#pragma warning disable CS8073 //The result of the expression is always 'false'
 			using (var sqlLog = new SqlLogSpy())
 			using (var session = OpenSession())
 			{
@@ -277,12 +281,12 @@ namespace NHibernate.Test.Criteria
 				Assert.That(ejLeftNull, Is.Null, "Entity join should be null");
 				Assert.That(sqlLog.Appender.GetEvents().Length, Is.EqualTo(1), "Only one SQL select is expected");
 			}
+#pragma warning restore CS8073 //The result of the expression is always 'false'
 		}
 
 		[Test]
 		public void EntityJoinForCustomEntityName()
 		{
-			
 			using (var sqlLog = new SqlLogSpy())
 			using (var session = OpenSession())
 			{
@@ -303,7 +307,6 @@ namespace NHibernate.Test.Criteria
 		[Test]
 		public void EntityJoinForCustomEntityName_Expression()
 		{
-			
 			using (var sqlLog = new SqlLogSpy())
 			using (var session = OpenSession())
 			{
@@ -404,7 +407,6 @@ namespace NHibernate.Test.Criteria
 							m.Inverse(true);
 						},
 						a => a.OneToMany());
-
 				});
 
 			mapper.Class<EntitySimpleChild>(
@@ -454,7 +456,6 @@ namespace NHibernate.Test.Criteria
 					rc.Property(e => e.Composite1Key1);
 					rc.Property(e => e.Composite1Key2);
 					rc.Property(e => e.CustomEntityNameId);
-					
 				});
 
 			mapper.Class<EntityCustomEntityName>(

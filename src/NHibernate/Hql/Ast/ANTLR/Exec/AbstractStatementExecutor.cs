@@ -42,7 +42,7 @@ namespace NHibernate.Hql.Ast.ANTLR.Exec
 
 		protected ISessionFactoryImplementor Factory
 		{
-			get{return Walker.SessionFactoryHelper.Factory;}
+			get { return Walker.SessionFactoryHelper.Factory; }
 		}
 
 		protected virtual void CoordinateSharedCacheCleanup(ISessionImplementor session)
@@ -143,7 +143,7 @@ namespace NHibernate.Hql.Ast.ANTLR.Exec
 
 		protected string GenerateIdSubselect(IQueryable persister)
 		{
-			return "select " + StringHelper.Join(", ", persister.IdentifierColumnNames) + " from " + persister.TemporaryIdTableName;
+			return "select " + string.Join(", ", persister.IdentifierColumnNames) + " from " + persister.TemporaryIdTableName;
 		}
 
 		protected virtual void CreateTemporaryTableIfNecessary(IQueryable persister, ISessionImplementor session)
@@ -188,9 +188,9 @@ namespace NHibernate.Hql.Ast.ANTLR.Exec
 			{
 				IIsolatedWork work = new TmpIdTableDropIsolatedWork(persister, log, session);
 
-				if (ShouldIsolateTemporaryTableDDL())
+				if (ShouldIsolateTemporaryTableDDL() && session.ConnectionManager.CurrentTransaction != null)
 				{
-					session.ConnectionManager.Transaction.RegisterSynchronization(
+					session.ConnectionManager.CurrentTransaction.RegisterSynchronization(
 						new IsolatedWorkAfterTransaction(work, session));
 				}
 				else
@@ -298,7 +298,7 @@ namespace NHibernate.Hql.Ast.ANTLR.Exec
 				{
 					stmnt = connection.CreateCommand();
 					stmnt.Transaction = transaction;
-					stmnt.CommandText = "drop table " + persister.TemporaryIdTableName;
+					stmnt.CommandText = $"{session.Factory.Dialect.DropTemporaryTableString} {persister.TemporaryIdTableName}";
 					stmnt.ExecuteNonQuery();
 					session.Factory.Settings.SqlStatementLogger.LogCommand(stmnt, FormatStyle.Ddl);
 				}

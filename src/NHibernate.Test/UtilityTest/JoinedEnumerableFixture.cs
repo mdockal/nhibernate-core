@@ -8,6 +8,8 @@ namespace NHibernate.Test.UtilityTest
 	/// <summary>
 	/// Test cases for the <see cref="JoinedEnumerable"/> class.
 	/// </summary>
+	// Since v5.6
+	[Obsolete]
 	[TestFixture]
 	public class JoinedEnumerableFixture
 	{
@@ -122,7 +124,6 @@ namespace NHibernate.Test.UtilityTest
 			Assert.IsTrue(first.WasDisposed, "first should have been disposed of.");
 			Assert.IsTrue(second.WasDisposed, "second should have been disposed of. ");
 		}
-
 
 		private JoinedEnumerable InitSingle(out EnumerableTester first)
 		{

@@ -28,7 +28,6 @@ namespace NHibernate.Test.NHSpecificTest.GH1496
 		
 		protected override void Configure(Configuration configuration)
 		{
-			base.Configure(configuration);
 			configuration.AppendListeners(ListenerType.PostUpdate, new[] { _auditEventListener });
 		}
 
@@ -50,7 +49,6 @@ namespace NHibernate.Test.NHSpecificTest.GH1496
 					person.Address = address;
 					session.Save(person);
 					testPerson = person;
-
 
 					address = new Address("Postal T", "State T", "Street T");
 					person = new Person(2, "Tom", address);
@@ -76,7 +74,6 @@ namespace NHibernate.Test.NHSpecificTest.GH1496
 					employee.Contact = contact;
 					session.Save(employee);
 					testEmployee = employee;
-
 
 					employee = new Employee(2, "Tom");
 					contact = new Contact { Phone = "666-666-6666", ContactIdentifier = new ContactIdentifier(WORK_TYPENAME, "2") };
@@ -104,7 +101,6 @@ namespace NHibernate.Test.NHSpecificTest.GH1496
 		[Test]
 		public async Task EventListener_Entity_NoChangeAsync()
 		{
-
 			using (var session = OpenSession())
 			{
 				using (var transaction = session.BeginTransaction())
@@ -177,8 +173,6 @@ namespace NHibernate.Test.NHSpecificTest.GH1496
 			}
 		}
 
-
-
 		[Test]
 		public async Task EventListener_EntityWithCompositeId_ChangePropertyAsync()
 		{
@@ -218,11 +212,9 @@ namespace NHibernate.Test.NHSpecificTest.GH1496
 			}
 		}
 
-
 		[Test]
 		public async Task EventListener_ManyToOne_ChangePropertyAsync()
 		{
-
 			using (var session = OpenSession())
 			{
 				using (var transaction = session.BeginTransaction())
@@ -262,7 +254,6 @@ namespace NHibernate.Test.NHSpecificTest.GH1496
 		[Test]
 		public async Task EventListener_Entity_SetNewManyToOneAsync()
 		{
-
 			using (var session = OpenSession())
 			{
 				using (var transaction = session.BeginTransaction())
@@ -306,7 +297,6 @@ namespace NHibernate.Test.NHSpecificTest.GH1496
 		[Test]
 		public async Task EventListener_ManyToOneWithCompositeId_ChangePropertyAsync()
 		{
-
 			using (var session = OpenSession())
 			{
 				using (var transaction = session.BeginTransaction())
@@ -346,7 +336,6 @@ namespace NHibernate.Test.NHSpecificTest.GH1496
 		[Test]
 		public async Task EventListener_Entity_SetNewManyToOneWithCompositeIdAsync()
 		{
-
 			using (var session = OpenSession())
 			{
 				using (var transaction = session.BeginTransaction())
@@ -365,7 +354,6 @@ namespace NHibernate.Test.NHSpecificTest.GH1496
 					_auditEventListener.Stop();
 				}
 			}
-
 
 			using (var session = OpenSession())
 			{
@@ -406,7 +394,6 @@ namespace NHibernate.Test.NHSpecificTest.GH1496
 					}, "Saving data failed.");
 				}
 			}
-
 
 			using (var session = OpenSession())
 			{

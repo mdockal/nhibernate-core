@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using Iesi.Collections.Generic;
 using NHibernate.Engine;
 using NHibernate.Proxy;
+using NHibernate.Util;
 
 namespace NHibernate.Intercept
 {
@@ -13,6 +15,7 @@ namespace NHibernate.Intercept
 		[NonSerialized]
 		private ISessionImplementor session;
 		private ISet<string> uninitializedFields;
+		private ISet<string> uninitializedFieldsReadOnly;
 		private readonly ISet<string> unwrapProxyFieldNames;
 		private readonly HashSet<string> loadedUnwrapProxyFieldNames = new HashSet<string>();
 		private readonly string entityName;
@@ -29,6 +32,7 @@ namespace NHibernate.Intercept
 			this.unwrapProxyFieldNames = unwrapProxyFieldNames ?? new HashSet<string>();
 			this.entityName = entityName;
 			this.mappedClass = mappedClass;
+			this.uninitializedFieldsReadOnly = uninitializedFields != null ? new ReadOnlySet<string>(new HashSet<string>(uninitializedFields)) : null;
 		}
 
 		#region IFieldInterceptor Members
@@ -76,6 +80,8 @@ namespace NHibernate.Intercept
 
 		#endregion
 
+		// Since v5.3
+		[Obsolete("Please use GetUninitializedFields extension method instead")]
 		public ISet<string> UninitializedFields
 		{
 			get { return uninitializedFields; }
@@ -88,6 +94,32 @@ namespace NHibernate.Intercept
 
 		public object Intercept(object target, string fieldName, object value)
 		{
+			return Intercept(target, fieldName, value, false);
+		}
+
+		public object Intercept(object target, string fieldName, object value, bool setter)
+		{
+			if (setter)
+			{
+				if (IsUninitializedProperty(fieldName))
+				{
+					uninitializedFields.Remove(fieldName);
+				}
+
+				if (!unwrapProxyFieldNames.Contains(fieldName))
+				{
+					return value;
+				}
+
+				// When a proxy is set by the user which we know when the session is set, we should not unwrap it
+				if (session != null || !value.IsProxy())
+				{
+					loadedUnwrapProxyFieldNames.Add(fieldName);
+				}
+
+				return value;
+			}
+
 			// NH Specific: Hibernate only deals with lazy properties here, we deal with 
 			// both lazy properties and with no-proxy. 
 			if (initializing)
@@ -95,39 +127,43 @@ namespace NHibernate.Intercept
 				return InvokeImplementation;
 			}
 
-			if (IsInitializedField(fieldName))
+			if (IsUninitializedProperty(fieldName))
 			{
-				if (value.IsProxy() && IsInitializedAssociation(fieldName))
-					return InitializeOrGetAssociation((INHibernateProxy) value, fieldName);
+				if (session == null)
+				{
+					throw new LazyInitializationException(EntityName, null, string.Format("entity with lazy properties is not associated with a session. entity-name:'{0}' property:'{1}'", EntityName, fieldName));
+				}
+				if (!session.IsOpen || !session.IsConnected)
+				{
+					throw new LazyInitializationException(EntityName, null, string.Format("session is not connected. entity-name:'{0}' property:'{1}'", EntityName, fieldName));
+				}
+
+				return InitializeField(fieldName, target);
+			}
+
+			if (!IsUninitializedAssociation(fieldName))
+			{
+				return value;
+			}
+
+			if (value is INHibernateProxy nhproxy)
+			{
+				value = InitializeOrGetAssociation(nhproxy, fieldName);
+				if (session?.Factory.IsClosed == false)
+				{
+					// Set the property value in order to be accessible when the session is closed
+					var persister = session.Factory.GetEntityPersister(entityName);
+					persister.SetPropertyValue(
+						target,
+						persister.EntityMetamodel.GetPropertyIndex(fieldName),
+						value);
+				}
 
 				return value;
 			}
 
-			if (session == null)
-			{
-				throw new LazyInitializationException(EntityName, null, string.Format("entity with lazy properties is not associated with a session. entity-name:'{0}' property:'{1}'", EntityName, fieldName));
-			}
-			if (!session.IsOpen || !session.IsConnected)
-			{
-				throw new LazyInitializationException(EntityName, null, string.Format("session is not connected. entity-name:'{0}' property:'{1}'", EntityName, fieldName));
-			}
-
-			if (IsUninitializedProperty(fieldName))
-			{
-				return InitializeField(fieldName, target);
-			}
-
-			if (value.IsProxy() && IsUninitializedAssociation(fieldName))
-			{
-				var nhproxy = value as INHibernateProxy;
-				return InitializeOrGetAssociation(nhproxy, fieldName);
-			}
-			return InvokeImplementation;
-		}
-
-		private bool IsInitializedAssociation(string fieldName)
-		{
-			return loadedUnwrapProxyFieldNames.Contains(fieldName);
+			loadedUnwrapProxyFieldNames.Add(fieldName);
+			return value;
 		}
 
 		private bool IsUninitializedAssociation(string fieldName)
@@ -148,7 +184,7 @@ namespace NHibernate.Intercept
 				value.HibernateLazyInitializer.Unwrap = true; // means that future Load/Get from the session will get the implementation
 				loadedUnwrapProxyFieldNames.Add(fieldName);
 			}
-			return value.HibernateLazyInitializer.GetImplementation(session);
+			return value.HibernateLazyInitializer.GetImplementation();
 		}
 
 		private object InitializeField(string fieldName, object target)
@@ -164,8 +200,21 @@ namespace NHibernate.Intercept
 			{
 				initializing = false;
 			}
-			uninitializedFields = null; //let's assume that there is only one lazy fetch group, for now!
+
 			return result;
+		}
+
+		public ISet<string> GetUninitializedFields()
+		{
+			return uninitializedFields ?? CollectionHelper.EmptySet<string>();
+		}
+		
+		public void ClearInitializedLazyFields()
+		{
+			if (uninitializedFieldsReadOnly != null)
+			{
+				uninitializedFields.UnionWith(uninitializedFieldsReadOnly);
+			}
 		}
 	}
 }

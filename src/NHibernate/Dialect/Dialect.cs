@@ -55,6 +55,7 @@ namespace NHibernate.Dialect
 		static Dialect()
 		{
 			StandardAggregateFunctions["count"] = new CountQueryFunctionInfo();
+			StandardAggregateFunctions["count_big"] = new CountQueryFunctionInfo();
 			StandardAggregateFunctions["avg"] = new AvgQueryFunctionInfo();
 			StandardAggregateFunctions["max"] = new ClassicAggregateFunction("max", false);
 			StandardAggregateFunctions["min"] = new ClassicAggregateFunction("min", false);
@@ -93,19 +94,19 @@ namespace NHibernate.Dialect
 			RegisterFunction("coalesce", new StandardSQLFunction("coalesce"));
 			RegisterFunction("nullif", new StandardSQLFunction("nullif"));
 			RegisterFunction("abs", new StandardSQLFunction("abs"));
-			RegisterFunction("mod", new StandardSQLFunction("mod", NHibernateUtil.Int32));
+			RegisterFunction("mod", new ModulusFunction(false, false));
 			RegisterFunction("sqrt", new StandardSQLFunction("sqrt", NHibernateUtil.Double));
 			RegisterFunction("upper", new StandardSQLFunction("upper"));
 			RegisterFunction("lower", new StandardSQLFunction("lower"));
 			RegisterFunction("cast", new CastFunction());
 			RegisterFunction("transparentcast", new TransparentCastFunction());
 			RegisterFunction("extract", new AnsiExtractFunction());
-			RegisterFunction("concat", new VarArgsSQLFunction(NHibernateUtil.String, "(", "||", ")"));
+			RegisterFunction("concat", new VarArgsSQLFunction(NHibernateUtil.String, "(", " || ", ")"));
 
 			// the syntax of current_timestamp is extracted from H3.2 tests 
 			// - test\hql\ASTParserLoadingTest.java
 			// - test\org\hibernate\test\hql\HQLTest.java
-			RegisterFunction("current_timestamp", new NoArgSQLFunction("current_timestamp", NHibernateUtil.DateTime, true));
+			RegisterFunction("current_timestamp", new NoArgSQLFunction("current_timestamp", NHibernateUtil.LocalDateTime, true));
 			RegisterFunction("sysdate", new NoArgSQLFunction("sysdate", NHibernateUtil.DateTime, false));
 
 			//map second/minute/hour/day/month/year to ANSI extract(), override on subclasses
@@ -123,6 +124,7 @@ namespace NHibernate.Dialect
 			RegisterFunction("bnot", new Function.BitwiseNativeOperation("~", true));
 
 			RegisterFunction("str", new SQLFunctionTemplate(NHibernateUtil.String, "cast(?1 as char)"));
+			RegisterFunction("strguid", new SQLFunctionTemplate(NHibernateUtil.String, "?1"));
 
 			// register hibernate types for default use in scalar sqlquery type auto detection
 			RegisterHibernateType(DbType.Int64, NHibernateUtil.Int64.Name);
@@ -147,15 +149,18 @@ namespace NHibernate.Dialect
 		public static Dialect GetDialect()
 		{
 			string dialectName;
+#pragma warning disable 618
+			var properties = Environment.Properties;
+#pragma warning restore 618
 			try
 			{
-				dialectName = Environment.Properties[Environment.Dialect];
+				dialectName = properties[Environment.Dialect];
 			}
 			catch (Exception e)
 			{
 				throw new HibernateException("The dialect was not set. Set the property 'dialect'.", e);
 			}
-			return InstantiateDialect(dialectName, Environment.Properties);
+			return InstantiateDialect(dialectName, properties);
 		}
 
 		/// <summary>
@@ -203,6 +208,7 @@ namespace NHibernate.Dialect
 			DefaultCastLength = PropertiesHelper.GetInt32(Environment.QueryDefaultCastLength, settings, 4000);
 			DefaultCastPrecision = PropertiesHelper.GetByte(Environment.QueryDefaultCastPrecision, settings, null) ?? 29;
 			DefaultCastScale = PropertiesHelper.GetByte(Environment.QueryDefaultCastScale, settings, null) ?? 10;
+			EscapeBackslashInStrings = PropertiesHelper.GetBoolean(Environment.EscapeBackslashInStrings, settings, EscapeBackslashInStrings);
 		}
 
 		#endregion
@@ -267,12 +273,42 @@ namespace NHibernate.Dialect
 		/// (via the CAST() SQL function) for the given <see cref="SqlType"/> typecode.
 		/// </summary>
 		/// <param name="sqlType">The <see cref="SqlType"/> typecode.</param>
+		/// <param name="typeName">The database type name that will be set in case it was found.</param>
+		/// <returns>Whether the type name was found.</returns>
+		public virtual bool TryGetCastTypeName(SqlType sqlType, out string typeName)
+		{
+			return TryGetCastTypeName(sqlType, _typeNames, out typeName);
+		}
+
+		/// <summary> 
+		/// Get the name of the database type appropriate for casting operations
+		/// (via the CAST() SQL function) for the given <see cref="SqlType"/> typecode.
+		/// </summary>
+		/// <param name="sqlType">The <see cref="SqlType"/> typecode.</param>
 		/// <param name="castTypeNames">The source for type names.</param>
 		/// <returns>The database type name.</returns>
 		protected virtual string GetCastTypeName(SqlType sqlType, TypeNames castTypeNames)
 		{
+			if (!TryGetCastTypeName(sqlType, castTypeNames, out var result))
+			{
+				throw new ArgumentException("Dialect does not support DbType." + sqlType.DbType, nameof(sqlType));
+			}
+
+			return result;
+		}
+
+		/// <summary> 
+		/// Get the name of the database type appropriate for casting operations
+		/// (via the CAST() SQL function) for the given <see cref="SqlType"/> typecode.
+		/// </summary>
+		/// <param name="sqlType">The <see cref="SqlType"/> typecode.</param>
+		/// <param name="castTypeNames">The source for type names.</param>
+		/// <param name="typeName">The database type name that will be set in case it was found.</param>
+		/// <returns>Whether the type name was found.</returns>
+		protected virtual bool TryGetCastTypeName(SqlType sqlType, TypeNames castTypeNames, out string typeName)
+		{
 			if (sqlType.LengthDefined || sqlType.PrecisionDefined || sqlType.ScaleDefined)
-				return castTypeNames.Get(sqlType.DbType, sqlType.Length, sqlType.Precision, sqlType.Scale);
+				return castTypeNames.TryGet(sqlType.DbType, sqlType.Length, sqlType.Precision, sqlType.Scale, out typeName);
 			switch (sqlType.DbType)
 			{
 				case DbType.Decimal:
@@ -280,18 +316,18 @@ namespace NHibernate.Dialect
 				case DbType.Double:
 					// We cannot know if the user needs its digit after or before the dot, so use a configurable
 					// default.
-					return castTypeNames.Get(sqlType.DbType, 0, DefaultCastPrecision, DefaultCastScale);
+					return castTypeNames.TryGet(sqlType.DbType, 0, DefaultCastPrecision, DefaultCastScale, out typeName);
 				case DbType.DateTime:
 				case DbType.DateTime2:
 				case DbType.DateTimeOffset:
 				case DbType.Time:
 				case DbType.Currency:
 					// Use default for these, dialects are supposed to map them to max capacity
-					return castTypeNames.Get(sqlType.DbType);
+					return castTypeNames.TryGet(sqlType.DbType, out typeName);
 				default:
 					// Other types are either length bound or not length/precision/scale bound. Otherwise they need to be
 					// handled previously.
-					return castTypeNames.Get(sqlType.DbType, DefaultCastLength, 0, 0);
+					return castTypeNames.TryGet(sqlType.DbType, DefaultCastLength, 0, 0, out typeName);
 			}
 		}
 
@@ -468,10 +504,24 @@ namespace NHibernate.Dialect
 			get { return true; }
 		}
 
+		// Since v5.2
+		[Obsolete("Use or override SupportsNullInUnique instead")]
 		public virtual bool SupportsNotNullUnique
 		{
 			get { return true; }
 		}
+
+		/// <summary>
+		/// Does this dialect supports <c>null</c> values in columns belonging to an unique constraint/index?
+		/// </summary>
+		/// <remarks>Some databases do not accept <c>null</c> in unique constraints at all. In such case,
+		/// this property should be overriden for yielding <c>false</c>. This property is not meant for distinguishing
+		/// databases ignoring <c>null</c> when checking uniqueness (ANSI behavior) from those considering <c>null</c>
+		/// as a value and checking for its uniqueness.</remarks>
+		public virtual bool SupportsNullInUnique
+#pragma warning disable 618
+			=> SupportsNotNullUnique;
+#pragma warning restore 618
 
 		public virtual IDataBaseSchema GetDataBaseSchema(DbConnection connection)
 		{
@@ -668,28 +718,28 @@ namespace NHibernate.Dialect
 
 		/// <summary> 
 		/// Does the dialect require that temporary table DDL statements occur in
-		/// isolation from other statements?  This would be the case if the creation
+		/// isolation from other statements? This would be the case if the creation
 		/// would cause any current transaction to get committed implicitly.
-		///  </summary>
-		/// <returns> see the result matrix above. </returns>
+		/// </summary>
+		/// <returns>See the result matrix in the remarks.</returns>
 		/// <remarks>
-		/// JDBC defines a standard way to query for this information via the
-		/// {@link java.sql.DatabaseMetaData#dataDefinitionCausesTransactionCommit()}
-		/// method.  However, that does not distinguish between temporary table
-		/// DDL and other forms of DDL; MySQL, for example, reports DDL causing a
-		/// transaction commit via its driver, even though that is not the case for
-		/// temporary table DDL.
-		/// <p/>
-		/// Possible return values and their meanings:<ul>
-		/// <li>{@link Boolean#TRUE} - Unequivocally, perform the temporary table DDL in isolation.</li>
-		/// <li>{@link Boolean#FALSE} - Unequivocally, do <b>not</b> perform the temporary table DDL in isolation.</li>
-		/// <li><i>null</i> - defer to the JDBC driver response in regards to {@link java.sql.DatabaseMetaData#dataDefinitionCausesTransactionCommit()}</li>
-		/// </ul>
+		/// Possible return values and their meanings:
+		/// <list type="bullet">
+		/// <item>
+		/// <term><see langword="true" /></term>
+		/// <description>Unequivocally, perform the temporary table DDL in isolation.</description>
+		/// </item>
+		/// <item>
+		/// <term><see langword="false" /></term>
+		/// <description>Unequivocally, do <b>not</b> perform the temporary table DDL in isolation.</description>
+		/// </item>
+		/// <item>
+		/// <term><see langword="null" /></term>
+		/// <description>Defer to <see cref="Cfg.Settings.IsDataDefinitionImplicitCommit" />.</description>
+		/// </item>
+		/// </list>
 		/// </remarks>
-		public virtual bool? PerformTemporaryTableDDLInIsolation()
-		{
-			return null;
-		}
+		public virtual bool? PerformTemporaryTableDDLInIsolation() => null;
 
 		/// <summary> Do we need to drop the temporary table after use? </summary>
 		public virtual bool DropTemporaryTableAfterUse()
@@ -776,7 +826,6 @@ namespace NHibernate.Dialect
 		{
 			return " drop constraint " + constraintName;
 		}
-
 
 		/// <summary>
 		/// The syntax that is used to check if a constraint does not exists before creating it
@@ -1290,6 +1339,11 @@ namespace NHibernate.Dialect
 			return new ANSIJoinFragment();
 		}
 
+		/// <summary>
+		/// Does this dialect support CROSS JOIN?
+		/// </summary>
+		public virtual bool SupportsCrossJoin => true;
+
 		/// <summary> 
 		/// Create a <see cref="CaseFragment"/> strategy responsible
 		/// for handling this dialect's variations in how CASE statements are
@@ -1299,14 +1353,6 @@ namespace NHibernate.Dialect
 		public virtual CaseFragment CreateCaseFragment()
 		{
 			return new ANSICaseFragment(this);
-		}
-
-		/// <summary> The SQL literal value to which this database maps boolean values. </summary>
-		/// <param name="value">The boolean value </param>
-		/// <returns> The appropriate SQL literal. </returns>
-		public virtual string ToBooleanValueString(bool value)
-		{
-			return value ? "1" : "0";
 		}
 
 		internal static void ExtractColumnOrAliasNames(SqlString select, out List<SqlString> columnsOrAliases, out Dictionary<SqlString, SqlString> aliasToColumn, out Dictionary<SqlString, SqlString> columnToAlias)
@@ -2023,6 +2069,55 @@ namespace NHibernate.Dialect
 
 		#endregion
 
+		#region Literals support
+
+		/// <summary>The SQL literal value to which this database maps boolean values.</summary>
+		/// <param name="value">The boolean value.</param>
+		/// <returns>The appropriate SQL literal.</returns>
+		public virtual string ToBooleanValueString(bool value)
+			=> value ? "1" : "0";
+
+		/// <summary>
+		/// <see langword="true" /> if the database needs to have backslash escaped in string literals.
+		/// </summary>
+		/// <remarks><see langword="false" /> by default in the base dialect, to conform to SQL standard.</remarks>
+		protected virtual bool EscapeBackslashInStrings { get; set; }
+
+		/// <summary>
+		/// <see langword="true" /> if the database needs to have Unicode literals prefixed by <c>N</c>.
+		/// </summary>
+		/// <remarks><see langword="false" /> by default in the base dialect.</remarks>
+		protected virtual bool UseNPrefixForUnicodeStrings => false;
+
+		/// <summary>The SQL string literal value to which this database maps string values.</summary>
+		/// <param name="value">The string value.</param>
+		/// <param name="type">The SQL type of the string value.</param>
+		/// <returns>The appropriate SQL string literal.</returns>
+		/// <exception cref="ArgumentNullException">Thrown if <paramref name="value"/> or
+		/// <paramref name="type"/> is <see langword="null" />.</exception>
+		public virtual string ToStringLiteral(string value, SqlType type)
+		{
+			if (value == null)
+				throw new ArgumentNullException(nameof(value));
+			if (type == null)
+				throw new ArgumentNullException(nameof(type));
+
+			var literal = new StringBuilder(value);
+			if (EscapeBackslashInStrings)
+				literal.Replace(@"\", @"\\");
+
+			literal
+				.Replace("'", "''")
+				.Insert(0, '\'')
+				.Append('\'');
+
+			if (UseNPrefixForUnicodeStrings && (type.DbType == DbType.String || type.DbType == DbType.StringFixedLength))
+				literal.Insert(0, 'N');
+			return literal.ToString();
+		}
+
+		#endregion
+
 		#region Union subclass support
 
 		/// <summary> 
@@ -2418,6 +2513,9 @@ namespace NHibernate.Dialect
 			get { return "create table"; }
 		}
 
+		/// <summary>Command used to drop a temporary table.</summary>
+		public virtual string DropTemporaryTableString => "drop table";
+
 		/// <summary> 
 		/// Get any fragments needing to be postfixed to the command for
 		/// temporary table creation. 
@@ -2557,6 +2655,11 @@ namespace NHibernate.Dialect
 		{
 			get { return false; }
 		}
+
+		/// <summary>
+		/// Whether <see cref="decimal"/> is stored as a floating point number.
+		/// </summary>
+		public virtual bool IsDecimalStoredAsFloatingPointNumber => false;
 
 		public virtual bool IsKnownToken(string currentToken, string nextToken)
 		{

@@ -15,7 +15,7 @@ namespace NHibernate.Mapping
 	[Serializable]
 	public class SimpleValue : IKeyValue
 	{
-		private readonly List<ISelectable> columns = new List<ISelectable>();
+		private readonly List<ISelectable> columns = new List<ISelectable>(1);
 		private IType type;
 		private IDictionary<string, string> typeParameters;
 
@@ -37,10 +37,7 @@ namespace NHibernate.Mapping
 			this.table = table;
 		}
 
-		public virtual IEnumerable<Column> ConstraintColumns
-		{
-			get { return new SafetyEnumerable<Column>(columns); }
-		}
+		public virtual IEnumerable<Column> ConstraintColumns => columns.OfType<Column>();
 
 		public string ForeignKeyName
 		{
@@ -63,7 +60,7 @@ namespace NHibernate.Mapping
 		public string IdentifierGeneratorStrategy
 		{
 			get { return identifierGeneratorStrategy; }
-			set { identifierGeneratorStrategy = value; }
+			set { identifierGeneratorStrategy = value == null ? null : string.Intern(value); }
 		}
 
 		public virtual bool IsComposite
@@ -130,7 +127,7 @@ namespace NHibernate.Mapping
 				if ((typeName == null && value != null) || (typeName != null && !typeName.Equals(value)))
 				{
 					// the property change
-					typeName = value;
+					typeName = value == null ? null : string.Intern(value);
 					type = null; // invalidate type
 				}
 			}
@@ -324,7 +321,7 @@ namespace NHibernate.Mapping
 
 		public virtual bool IsValid(IMapping mapping)
 		{
-			return ColumnSpan == Type.GetColumnSpan(mapping);
+			return ColumnSpan == Type.GetOwnerColumnSpan(mapping);
 		}
 
 		public virtual void CreateForeignKey()
@@ -344,6 +341,8 @@ namespace NHibernate.Mapping
 			set { isAlternateUniqueKey = value; }
 		}
 
+		// Since v5.6
+		[Obsolete("This method is not used and will be removed in a future version")]
 		public virtual void SetTypeUsingReflection(string className, string propertyName, string accesorName)
 		{
 			if (typeName == null)
@@ -354,7 +353,28 @@ namespace NHibernate.Mapping
 				}
 				try
 				{
-					typeName = ReflectHelper.ReflectedPropertyClass(className, propertyName, accesorName).AssemblyQualifiedName;
+					var aqn = ReflectHelper.ReflectedPropertyClass(className, propertyName, accesorName).AssemblyQualifiedName;
+					typeName = aqn == null ? null : string.Intern(aqn);
+				}
+				catch (HibernateException he)
+				{
+					throw new MappingException("Problem trying to set property type by reflection", he);
+				}
+			}
+		}
+		
+		public virtual void SetTypeUsingReflection(System.Type propertyOwnerType, string propertyName, string accessorName)
+		{
+			if (typeName == null)
+			{
+				if (propertyOwnerType == null)
+				{
+					throw new MappingException("you must specify types for a dynamic entity: " + propertyName);
+				}
+				try
+				{
+					var aqn = ReflectHelper.ReflectedPropertyClass(propertyOwnerType, propertyName, accessorName).AssemblyQualifiedName;
+					typeName = aqn == null ? null : string.Intern(aqn);
 				}
 				catch (HibernateException he)
 				{

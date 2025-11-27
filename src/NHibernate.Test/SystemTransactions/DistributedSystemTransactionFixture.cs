@@ -3,10 +3,8 @@ using System.Linq;
 using System.Threading;
 using System.Transactions;
 using log4net;
-using log4net.Repository.Hierarchy;
 using NHibernate.Cfg;
 using NHibernate.Engine;
-using NHibernate.Linq;
 using NHibernate.Test.TransactionTest;
 using NUnit.Framework;
 
@@ -364,7 +362,7 @@ namespace NHibernate.Test.SystemTransactions
 			var errors = mtr.GetErrors();
 			if (errors.Length > 0)
 			{
-				Assert.Fail("One or more thread failed, found {0} errors. First exception: {1}", errors.Length, errors[0]);
+				Assert.Fail($"One or more thread failed, found {errors.Length} errors. First exception: {errors[0]}");
 			}
 		}
 
@@ -541,10 +539,11 @@ namespace NHibernate.Test.SystemTransactions
 				}
 				var count = 0;
 				Assert.DoesNotThrow(() => count = s.Query<Person>().Count(), "Failed using the session after scope.");
-				if (count != 1)
+				const int expectedCount = 1;
+				if (count != expectedCount)
 					// We are not testing that here, so just issue a warning. Do not use DodgeTransactionCompletionDelayIfRequired
 					// before previous assert. We want to ascertain the session is usable in any cases.
-					Assert.Warn("Unexpected entity count: {0} instead of {1}. The transaction seems to have a delayed commit.", count, 1);
+					Assert.Warn($"Unexpected entity count: {count} instead of {expectedCount}. The transaction seems to have a delayed commit.");
 			}
 		}
 
@@ -708,6 +707,117 @@ namespace NHibernate.Test.SystemTransactions
 			{
 				ForceEscalationToDistributedTx.Escalate();
 				Assert.DoesNotThrow(() => s.JoinTransaction());
+			}
+		}
+
+		[Theory]
+		public void CanUseDependentTransaction(bool explicitFlush)
+		{
+			if (!TestDialect.SupportsDependentTransaction)
+				Assert.Ignore("Dialect does not support dependent transactions");
+			IgnoreIfUnsupported(explicitFlush);
+
+			try
+			{
+				using (var committable = new CommittableTransaction())
+				{
+					System.Transactions.Transaction.Current = committable;
+					using (var clone = committable.DependentClone(DependentCloneOption.RollbackIfNotComplete))
+					{
+						System.Transactions.Transaction.Current = clone;
+
+						using (var s = OpenSession())
+						{
+							if (!AutoJoinTransaction)
+								s.JoinTransaction();
+							s.Save(new Person());
+
+							if (explicitFlush)
+								s.Flush();
+							clone.Complete();
+						}
+					}
+
+					System.Transactions.Transaction.Current = committable;
+					committable.Commit();
+				}
+			}
+			finally
+			{
+				System.Transactions.Transaction.Current = null;
+			}
+		}
+
+		[Theory]
+		public void CanUseSessionWithManyDependentTransaction(bool explicitFlush)
+		{
+			if (!TestDialect.SupportsDependentTransaction)
+				Assert.Ignore("Dialect does not support dependent transactions");
+			IgnoreIfUnsupported(explicitFlush);
+
+			try
+			{
+				using (var s = Sfi.WithOptions().ConnectionReleaseMode(ConnectionReleaseMode.OnClose).OpenSession())
+				{
+					using (var committable = new CommittableTransaction())
+					{
+						System.Transactions.Transaction.Current = committable;
+						using (var clone = committable.DependentClone(DependentCloneOption.RollbackIfNotComplete))
+						{
+							System.Transactions.Transaction.Current = clone;
+							if (!AutoJoinTransaction)
+								s.JoinTransaction();
+							// Acquire the connection
+							var count = s.Query<Person>().Count();
+							Assert.That(count, Is.EqualTo(0), "Unexpected initial entity count.");
+							clone.Complete();
+						}
+
+						using (var clone = committable.DependentClone(DependentCloneOption.RollbackIfNotComplete))
+						{
+							System.Transactions.Transaction.Current = clone;
+							if (!AutoJoinTransaction)
+								s.JoinTransaction();
+							s.Save(new Person());
+
+							if (explicitFlush)
+								s.Flush();
+
+							clone.Complete();
+						}
+
+						using (var clone = committable.DependentClone(DependentCloneOption.RollbackIfNotComplete))
+						{
+							System.Transactions.Transaction.Current = clone;
+							if (!AutoJoinTransaction)
+								s.JoinTransaction();
+							var count = s.Query<Person>().Count();
+							Assert.That(count, Is.EqualTo(1), "Unexpected entity count after committed insert.");
+							clone.Complete();
+						}
+
+						System.Transactions.Transaction.Current = committable;
+						committable.Commit();
+					}
+				}
+			}
+			finally
+			{
+				System.Transactions.Transaction.Current = null;
+			}
+
+			DodgeTransactionCompletionDelayIfRequired();
+
+			using (var s = OpenSession())
+			{
+				using (var tx = new TransactionScope())
+				{
+					if (!AutoJoinTransaction)
+						s.JoinTransaction();
+					var count = s.Query<Person>().Count();
+					Assert.That(count, Is.EqualTo(1), "Unexpected entity count after global commit.");
+					tx.Complete();
+				}
 			}
 		}
 

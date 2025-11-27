@@ -9,6 +9,9 @@ using NHibernate.Util;
 
 namespace NHibernate.Hql.Ast.ANTLR.Tree
 {
+	// 6.0 TODO: consider retyping methods yielding IList<IASTNode> as IList<FromElement>
+	// They all do actually yield FromElement, and most of their callers end up recasting
+	// them.
 	/// <summary>
 	/// Represents the 'FROM' part of a query or subquery, containing all mapped class references.
 	/// Author: josh
@@ -33,6 +36,7 @@ namespace NHibernate.Hql.Ast.ANTLR.Tree
 		private readonly Dictionary<string, FromElement> _fromElementByTableAlias = new Dictionary<string, FromElement>();
 		private readonly NullableDictionary<string, FromElement> _fromElementsByPath = new NullableDictionary<string, FromElement>();
 		private readonly List<FromElement> _fromElements = new List<FromElement>();
+		private readonly List<FromElement> _appendFromElements = new List<FromElement>(); // Used for entity and subquery joins
 
 		/// <summary>
 		/// All of the implicit FROM xxx JOIN yyy elements that are the destination of a collection.  These are created from
@@ -68,15 +72,27 @@ namespace NHibernate.Hql.Ast.ANTLR.Tree
 		{
 			get { return _parentFromClause; }
 		}
-
+		
+		//6.0 TODO: Replace with Typed version below
 		public IList<IASTNode> GetExplicitFromElements()
 		{
-			return ASTUtil.CollectChildren(this, ExplicitFromPredicate);
+			return ASTUtil.CollectChildren<IASTNode>(this, ExplicitFromPredicate);
 		}
-
+		
+		internal IList<FromElement> GetExplicitFromElementsTyped()
+		{
+			return ASTUtil.CollectChildren<FromElement>(this, ExplicitFromPredicate);
+		}
+		
+		//6.0 TODO: Replace with Typed version below
 		public IList<IASTNode> GetCollectionFetches()
 		{
-			return ASTUtil.CollectChildren(this, CollectionFetchPredicate);
+			return ASTUtil.CollectChildren<IASTNode>(this, CollectionFetchPredicate);
+		}
+
+		internal IList<FromElement> GetCollectionFetchesTyped()
+		{
+			return ASTUtil.CollectChildren<FromElement>(this, CollectionFetchPredicate);
 		}
 
 		public FromElement FindCollectionJoin(String path)
@@ -147,7 +163,6 @@ namespace NHibernate.Hql.Ast.ANTLR.Tree
 			_collectionJoinFromElementsByPath.Add(path, destination);	// Add the new node to the map so that we don't create it twice.
 		}
 
-
 		private void AddChild(FromClause fromClause)
 		{
 			if (_childFromClauses == null)
@@ -194,27 +209,44 @@ namespace NHibernate.Hql.Ast.ANTLR.Tree
 			return fromElement;
 		}
 
+		//6.0 TODO: Replace with Typed version below
 		/// <summary>
 		/// Returns the list of from elements in order.
 		/// </summary>
 		/// <returns>The list of from elements (instances of FromElement).</returns>
 		public IList<IASTNode> GetFromElements()
 		{
-			return ASTUtil.CollectChildren(this, FromElementPredicate);
+			return ASTUtil.CollectChildren<IASTNode>(this, node => FromElementPredicate(node, this));
 		}
 
+		internal IList<FromElement> GetFromElementsTyped()
+		{
+			return ASTUtil.CollectChildren<FromElement>(this, node => FromElementPredicate(node, this));
+		}
+
+		//6.0 TODO: Replace with Typed version below
 		/// <summary>
 		/// Returns the list of from elements that will be part of the result set.
 		/// </summary>
 		/// <returns>the list of from elements that will be part of the result set.</returns>
 		public IList<IASTNode> GetProjectionList()
 		{
-			return ASTUtil.CollectChildren(this, ProjectionListPredicate);
+			return ASTUtil.CollectChildren<IASTNode>(this, node => ProjectionListPredicate(node, this));
+		}
+
+		internal IList<FromElement> GetProjectionListTyped()
+		{
+			return ASTUtil.CollectChildren<FromElement>(this, node => ProjectionListPredicate(node, this));
+		}
+
+		internal IList<FromElement> GetAllProjectionListTyped()
+		{
+			return ASTUtil.CollectChildren<FromElement>(this, node => AllProjectionListPredicate(node));
 		}
 
 		public FromElement GetFromElement()
 		{
-			return (FromElement)GetFromElements()[0];
+			return GetFromElementsTyped()[0];
 		}
 
 		public void AddDuplicateAlias(string alias, FromElement element)
@@ -224,7 +256,6 @@ namespace NHibernate.Hql.Ast.ANTLR.Tree
 				_fromElementByClassAlias.Add(alias, element);
 			}
 		}
-
 
 		/// <summary>
 		/// Look for an existing implicit or explicit join by the given path.
@@ -253,6 +284,10 @@ namespace NHibernate.Hql.Ast.ANTLR.Tree
 			}
 		}
 
+		internal bool IsScalarSubQuery => IsSubQuery && !IsJoinSubQuery;
+
+		internal bool IsJoinSubQuery { get; set; }
+
 		public string GetDisplayText()
 		{
 			return "FromClause{" +
@@ -274,25 +309,28 @@ namespace NHibernate.Hql.Ast.ANTLR.Tree
 			}
 		}
 
-		private static bool ProjectionListPredicate(IASTNode node)
+		private static bool ProjectionListPredicate(IASTNode node, FromClause fromClause)
 		{
-			var fromElement = node as FromElement;
-
-			if (fromElement != null)
-			{
-				return fromElement.InProjectionList;
-			}
-
-			return false;
+			return node is FromElement fromElement &&
+			       fromElement.InProjectionList &&
+			       // Skip in case node is within a join subquery
+			       fromElement.FromClause == fromClause;
 		}
 
-		private static bool FromElementPredicate(IASTNode node) 
+		private static bool AllProjectionListPredicate(IASTNode node)
+		{
+			return node is FromElement fromElement && fromElement.InProjectionList;
+		}
+
+		private static bool FromElementPredicate(IASTNode node, FromClause fromClause) 
 		{
 			var fromElement = node as FromElement;
 
 			if (fromElement != null)
 			{
-				return fromElement.IsFromOrJoinFragment;
+				return fromElement.IsFromOrJoinFragment &&
+					// Skip in case node is within a join subquery
+					fromElement.FromClause == fromClause;
 			}
 
 			return false;
@@ -350,6 +388,16 @@ namespace NHibernate.Hql.Ast.ANTLR.Tree
 			{
 				_fromElementByTableAlias[tableAlias] = element;
 			}
+
+			if (element.IsEntityJoin())
+			{
+				_appendFromElements.Add((EntityJoinFromElement) element);
+			}
+		}
+
+		internal void AppendFromElement(FromElement element)
+		{
+			_appendFromElements.Add(element);
 		}
 
 		private FromElement FindJoinByPathLocal(string path)
@@ -382,6 +430,47 @@ namespace NHibernate.Hql.Ast.ANTLR.Tree
 		public FromElement GetFromElementByClassName(string className)
 		{
 			return _fromElementByClassAlias.Values.FirstOrDefault(variable => variable.ClassName == className);
+		}
+
+		internal void FinishInit()
+		{
+			foreach (var item in _appendFromElements)
+			{
+				var dependentElement = GetFirstDependentFromElement(item);
+				if (dependentElement == null)
+				{
+					AddChild(item);
+				}
+				else
+				{
+					var index = dependentElement.ChildIndex;
+					dependentElement.Parent.InsertChild(index, item);
+				}
+			}
+
+			if (_appendFromElements.Count > 0)
+			{
+				_fromElements[0].JoinSequence.SetUseThetaStyle(true);
+			}
+			_appendFromElements.Clear();
+		}
+
+		private FromElement GetFirstDependentFromElement(FromElement element)
+		{
+			foreach (var fromElement in _fromElements)
+			{
+				if (fromElement == element ||
+					fromElement.WithClauseFromElements?.Contains(element) != true ||
+				    // Parent will be null for entity and subquery joins
+				    fromElement.Parent == null)
+				{
+					continue;
+				}
+
+				return fromElement;
+			}
+
+			return null;
 		}
 	}
 }

@@ -603,7 +603,7 @@ namespace NHibernate.Cfg.XmlHbmBinding
 			var id = new SimpleValue(model.CollectionTable);
 			new ValuePropertyBinder(id, Mappings).BindSimpleValue(idbagMapping.collectionid, IdentifierCollection.DefaultIdentifierColumnName);
 			model.Identifier = id;
-			new IdGeneratorBinder(Mappings).BindGenerator(id, idbagMapping.collectionid.generator);
+			new IdGeneratorBinder(Mappings).BindGenerator(id, idbagMapping.collectionid.Generator);
 			id.Table.SetIdentifierValue(id);
 		}
 
@@ -942,7 +942,6 @@ namespace NHibernate.Cfg.XmlHbmBinding
 					string.Format(
 						"many-to-many defining filter or where without join fetching not valid within collection using join fetching [{0}]",
 						collection.Role));
-
 			}
 
 			new FiltersBinder(collection, Mappings).Bind(filters, collection.AddManyToManyFilter);

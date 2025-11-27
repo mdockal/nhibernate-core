@@ -39,8 +39,11 @@ namespace NHibernate.Action
 			{
 				stopwatch = Stopwatch.StartNew();
 			}
-
-			bool veto = await (PreUpdateAsync(cancellationToken)).ConfigureAwait(false);
+			
+			if (await (PreUpdateAsync(cancellationToken)).ConfigureAwait(false))
+			{
+				return;
+			}
 
 			ISessionFactoryImplementor factory = Session.Factory;
 
@@ -59,10 +62,9 @@ namespace NHibernate.Action
 				slock = await (persister.Cache.LockAsync(ck, previousVersion, cancellationToken)).ConfigureAwait(false);
 			}
 
-			if (!veto)
-			{
-				await (persister.UpdateAsync(id, state, dirtyFields, hasDirtyCollection, previousState, previousVersion, instance, null, session, cancellationToken)).ConfigureAwait(false);
-			}
+			
+			await (persister.UpdateAsync(id, state, dirtyFields, hasDirtyCollection, previousState, previousVersion, instance, null, session, cancellationToken)).ConfigureAwait(false);
+			
 
 			EntityEntry entry = Session.PersistenceContext.GetEntry(instance);
 			if (entry == null)
@@ -99,7 +101,7 @@ namespace NHibernate.Action
 				}
 				else
 				{
-					CacheEntry ce = await (CacheEntry.CreateAsync(state, persister, persister.HasUninitializedLazyProperties(instance), nextVersion, Session, instance, cancellationToken)).ConfigureAwait(false);
+					CacheEntry ce = await (CacheEntry.CreateAsync(state, persister, nextVersion, Session, instance, cancellationToken)).ConfigureAwait(false);
 					cacheEntry = persister.CacheEntryStructure.Structure(ce);
 
 					bool put = await (persister.Cache.UpdateAsync(ck, cacheEntry, nextVersion, previousVersion, cancellationToken)).ConfigureAwait(false);
@@ -113,7 +115,7 @@ namespace NHibernate.Action
 
 			await (PostUpdateAsync(cancellationToken)).ConfigureAwait(false);
 
-			if (statsEnabled && !veto)
+			if (statsEnabled)
 			{
 				stopwatch.Stop();
 				factory.StatisticsImplementor.UpdateEntity(Persister.EntityName, stopwatch.Elapsed);

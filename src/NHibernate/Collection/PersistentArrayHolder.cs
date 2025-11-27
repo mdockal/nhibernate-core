@@ -94,14 +94,7 @@ namespace NHibernate.Collection
 
 		public override ICollection GetOrphans(object snapshot, string entityName)
 		{
-			object[] sn = (object[]) snapshot;
-			object[] arr = (object[]) array;
-			List<object> result = new List<object>(sn);
-			for (int i = 0; i < sn.Length; i++)
-			{
-				IdentityRemove(result, arr[i], entityName, Session);
-			}
-			return result;
+			return GetOrphans((object[]) snapshot, (object[]) array, entityName, Session);
 		}
 
 		public override bool IsWrapper(object collection)
@@ -203,9 +196,23 @@ namespace NHibernate.Collection
 
 			array = System.Array.CreateInstance(persister.ElementClass, cached.Length);
 
+			var elementType = persister.ElementType;
+			BeforeAssemble(elementType, cached);
+
 			for (int i = 0; i < cached.Length; i++)
 			{
-				array.SetValue(persister.ElementType.Assemble(cached[i], Session, owner), i);
+				array.SetValue(elementType.Assemble(cached[i], Session, owner), i);
+			}
+		}
+
+		private void BeforeAssemble(IType elementType, object[] cached)
+		{
+			if (Session.PersistenceContext.BatchFetchQueue.QueryCacheQueue != null)
+				return;
+
+			for (int i = 0; i < cached.Length; i++)
+			{
+				elementType.BeforeAssemble(cached[i], Session);
 			}
 		}
 

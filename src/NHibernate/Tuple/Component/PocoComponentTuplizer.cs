@@ -1,7 +1,9 @@
 using System;
 using NHibernate.Bytecode;
+using NHibernate.Bytecode.Lightweight;
 using NHibernate.Intercept;
 using NHibernate.Properties;
+using NHibernate.Util;
 
 namespace NHibernate.Tuple.Component
 {
@@ -18,7 +20,8 @@ namespace NHibernate.Tuple.Component
 		private readonly IGetter parentGetter;
 		[NonSerialized]
 		private IReflectionOptimizer optimizer;
-
+		[NonSerialized]
+		private bool isBytecodeProviderImpl; // 6.0 TODO: remove
 
 		[OnDeserialized]
 		internal void OnDeserialized(StreamingContext context)
@@ -95,13 +98,36 @@ namespace NHibernate.Tuple.Component
 			}
 		}
 
+		public override object GetPropertyValue(object component, int i)
+		{
+			if (isBytecodeProviderImpl && optimizer?.AccessOptimizer != null)
+			{
+				return component == null
+					? null
+					: optimizer.AccessOptimizer.GetPropertyValue(component, i);
+			}
+
+			return base.GetPropertyValue(component, i);
+		}
+
 		public override object GetParent(object component)
 		{
+			if (isBytecodeProviderImpl && optimizer?.AccessOptimizer != null)
+			{
+				return optimizer.AccessOptimizer.GetSpecializedPropertyValue(component);
+			}
+
 			return parentGetter.Get(component);
 		}
 
 		public override void SetParent(object component, object parent, Engine.ISessionFactoryImplementor factory)
 		{
+			if (isBytecodeProviderImpl && optimizer?.AccessOptimizer != null)
+			{
+				optimizer.AccessOptimizer.SetSpecializedPropertyValue(component, parent);
+				return;
+			}
+
 			parentSetter.Set(component, parent);
 		}
 
@@ -130,19 +156,20 @@ namespace NHibernate.Tuple.Component
 
 		protected internal override IGetter BuildGetter(Mapping.Component component, Mapping.Property prop)
 		{
-			return prop.GetGetter(component.ComponentClass);
+			return prop.GetGetter(component.ComponentClass.UnwrapIfNullable());
 		}
 
 		protected internal override ISetter BuildSetter(Mapping.Component component, Mapping.Property prop)
 		{
-			return prop.GetSetter(component.ComponentClass);
+			return prop.GetSetter(component.ComponentClass.UnwrapIfNullable());
 		}
 
 		protected void SetReflectionOptimizer()
 		{
 			if (Cfg.Environment.UseReflectionOptimizer)
 			{
-				optimizer = Cfg.Environment.BytecodeProvider.GetReflectionOptimizer(componentClass, getters, setters);
+				optimizer = Cfg.Environment.BytecodeProvider.GetReflectionOptimizer(componentClass, getters, setters, parentGetter, parentSetter);
+				isBytecodeProviderImpl = Cfg.Environment.BytecodeProvider is BytecodeProviderImpl;
 			}
 		}
 

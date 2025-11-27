@@ -21,6 +21,8 @@ namespace NHibernate.Test.Criteria.SelectModeTest
 	{
 		private Guid _parentEntityComplexId;
 
+		protected override string CacheConcurrencyStrategy => "nonstrict-read-write";
+
 		[Test]
 		public void SelectModeJoinOnly()
 		{
@@ -39,6 +41,27 @@ namespace NHibernate.Test.Criteria.SelectModeTest
 				Assert.That(NHibernateUtil.IsInitialized(root), Is.True);
 				Assert.That(root.Child1, Is.Not.Null);
 				Assert.That(NHibernateUtil.IsInitialized(root.Child1), Is.False, "Joined ManyToOne Child1 should not be fetched.");
+				Assert.That(sqlLog.Appender.GetEvents().Length, Is.EqualTo(1), "Only one SQL select is expected");
+			}
+		}
+
+		[Test]
+		public void SelectModeDetachedQueryOver()
+		{
+			using (var sqlLog = new SqlLogSpy())
+			using (var session = OpenSession())
+			{
+				EntityComplex root = null;
+				root = QueryOver.Of(() => root)
+								.Where(x => x.Id == _parentEntityComplexId)
+								.Fetch(SelectMode.Fetch, r => r.Child1)
+								.GetExecutableQueryOver(session)
+								.SingleOrDefault();
+
+				Assert.That(root, Is.Not.Null);
+				Assert.That(NHibernateUtil.IsInitialized(root), Is.True);
+				Assert.That(root.Child1, Is.Not.Null);
+				Assert.That(NHibernateUtil.IsInitialized(root.Child1), Is.True, "Joined ManyToOne Child1 should not be fetched.");
 				Assert.That(sqlLog.Appender.GetEvents().Length, Is.EqualTo(1), "Only one SQL select is expected");
 			}
 		}
@@ -142,6 +165,53 @@ namespace NHibernate.Test.Criteria.SelectModeTest
 				Assert.That(NHibernateUtil.IsInitialized(root), Is.True);
 				Assert.That(root.LazyProp, Is.Not.Null);
 				Assert.That(NHibernateUtil.IsPropertyInitialized(root, nameof(root.LazyProp)), Is.True, "Lazy property must be fetched.");
+				Assert.That(NHibernateUtil.IsPropertyInitialized(root, nameof(root.LazyProp2)), Is.True, "Lazy property must be fetched.");
+
+				Assert.That(sqlLog.Appender.GetEvents().Length, Is.EqualTo(1), "Only one SQL select is expected");
+			}
+		}
+
+		[Test]
+		public void SelectModeFetchKeepLazyPropertiesUninitialized()
+		{
+			using (var sqlLog = new SqlLogSpy())
+			using (var session = OpenSession())
+			{
+				var root = session.QueryOver<EntityComplex>()
+								.Fetch(SelectMode.Fetch, ec => ec)
+								.Where(ec => ec.LazyProp != null)
+								.Take(1)
+								.SingleOrDefault();
+
+				Assert.That(root, Is.Not.Null);
+				Assert.That(NHibernateUtil.IsInitialized(root), Is.True);
+				Assert.That(NHibernateUtil.IsPropertyInitialized(root, nameof(root.LazyProp)), Is.False, "Property must be lazy.");
+				Assert.That(NHibernateUtil.IsPropertyInitialized(root, nameof(root.LazyProp2)), Is.False, "Property must be lazy.");
+
+				Assert.That(sqlLog.Appender.GetEvents().Length, Is.EqualTo(1), "Only one SQL select is expected");
+			}
+		}
+
+		[Test]
+		public void SelectModeFetchLazyPropertiesFetchGroup()
+		{
+			using (var sqlLog = new SqlLogSpy())
+			using (var session = OpenSession())
+			{
+				var root = session.QueryOver<EntityComplex>()
+								.Fetch(SelectMode.FetchLazyPropertyGroup, ec => ec.LazyProp, ec => ec.LazyProp2, ec => ec.SameTypeChild.LazyProp2)
+								.Where(ec => ec.Id == _parentEntityComplexId)
+								.SingleOrDefault();
+
+				Assert.That(root, Is.Not.Null);
+				Assert.That(NHibernateUtil.IsInitialized(root), Is.True);
+				Assert.That(root.LazyProp, Is.Not.Null);
+				Assert.That(NHibernateUtil.IsPropertyInitialized(root, nameof(root.LazyProp)), Is.True, "Lazy property must be fetched.");
+				Assert.That(NHibernateUtil.IsPropertyInitialized(root, nameof(root.LazyProp2)), Is.True, "Lazy property must be fetched.");
+				Assert.That(NHibernateUtil.IsInitialized(root.SameTypeChild), Is.True, "Object must be initialized.");
+				Assert.That(root.SameTypeChild, Is.Not.Null);
+				Assert.That(NHibernateUtil.IsPropertyInitialized(root.SameTypeChild, nameof(root.LazyProp2)), Is.True, "Lazy property must be fetched.");
+				Assert.That(NHibernateUtil.IsPropertyInitialized(root.SameTypeChild, nameof(root.LazyProp)), Is.False, "Property must be lazy.");
 
 				Assert.That(sqlLog.Appender.GetEvents().Length, Is.EqualTo(1), "Only one SQL select is expected");
 			}
@@ -266,7 +336,7 @@ namespace NHibernate.Test.Criteria.SelectModeTest
 
 				Assert.That(NHibernateUtil.IsInitialized(rootChild), Is.True);
 				Assert.That(NHibernateUtil.IsInitialized(parentJoin), Is.True);
-				Assert.That(NHibernateUtil.IsPropertyInitialized(parentJoin, nameof(parentJoin.LazyProp)), Is.Not.Null.Or.Empty);
+				Assert.That(NHibernateUtil.IsPropertyInitialized(parentJoin, nameof(parentJoin.LazyProp)), Is.True);
 				Assert.That(parentJoin.LazyProp, Is.Not.Null.Or.Empty);
 
 				Assert.That(sqlLog.Appender.GetEvents().Length, Is.EqualTo(1), "Only one SQL select is expected");
@@ -426,6 +496,89 @@ namespace NHibernate.Test.Criteria.SelectModeTest
 			}
 		}
 
+		[Test]
+		public void OrderedInnerJoinFetch()
+		{
+			using (var session = OpenSession())
+			{
+				var list = session.QueryOver<EntityComplex>()
+					.Where(ec => ec.Id == _parentEntityComplexId)
+					.JoinQueryOver(c => c.ChildrenList).Fetch(SelectMode.Fetch, child => child)
+					.TransformUsing(Transformers.DistinctRootEntity)
+					.List();
+
+				var childList = list[0].ChildrenList;
+				Assert.That(list[0].ChildrenList.Count, Is.GreaterThan(1));
+				Assert.That(list[0].ChildrenList, Is.EqualTo(list[0].ChildrenList.OrderByDescending(c => c.OrderIdx)), "wrong order");
+			}
+		}
+
+		//GH-2440
+		[Test]
+		public void FetchWithAliasedJoinFuture()
+		{
+			using (var session = OpenSession())
+			{
+				EntityComplex alias = null;
+				EntitySimpleChild child1 = null;
+				var list = session.QueryOver<EntityComplex>(() => alias)
+								.Where(ec => ec.Id == _parentEntityComplexId)
+								.JoinQueryOver(() => alias.Child1, () => child1)
+								.Fetch(SelectMode.Fetch, () => alias.ChildrenList)
+								.TransformUsing(Transformers.DistinctRootEntity)
+								.Future()
+								.GetEnumerable()
+								.ToList();
+
+				var childList = list[0].ChildrenList;
+				Assert.That(list[0].ChildrenList.Count, Is.GreaterThan(1));
+				Assert.That(list[0].ChildrenList, Is.EqualTo(list[0].ChildrenList.OrderByDescending(c => c.OrderIdx)), "wrong order");
+			}
+		}
+
+		//GH-2440
+		[Test]
+		public void CacheableFetchWithAliasedJoinFuture()
+		{
+			using (var session = OpenSession())
+			{
+				EntityComplex alias = null;
+				EntitySimpleChild child1 = null;
+				var list = session.QueryOver<EntityComplex>(() => alias)
+								.Where(ec => ec.Id == _parentEntityComplexId)
+								.JoinQueryOver(() => alias.Child1, () => child1)
+								.Fetch(SelectMode.Fetch, () => alias.ChildrenList)
+								.TransformUsing(Transformers.DistinctRootEntity)
+								.Cacheable()
+								.Future()
+								.GetEnumerable()
+								.ToList();
+				EntityComplex value = null;
+				Assert.DoesNotThrow(() => value = list[0]);
+				Assert.That(value, Is.Not.Null);
+			}
+
+			using (var sqlLog = new SqlLogSpy())
+			using (var session = OpenSession())
+			{
+				EntityComplex alias = null;
+				EntitySimpleChild child1 = null;
+				var list = session.QueryOver<EntityComplex>(() => alias)
+								.Where(ec => ec.Id == _parentEntityComplexId)
+								.JoinQueryOver(() => alias.Child1, () => child1)
+								.Fetch(SelectMode.Fetch, () => alias.ChildrenList)
+								.TransformUsing(Transformers.DistinctRootEntity)
+								.Cacheable()
+								.Future()
+								.ToList();
+				EntityComplex value = null;
+				Assert.DoesNotThrow(() => value = list[0]);
+				Assert.That(value, Is.Not.Null);
+
+				Assert.That(sqlLog.Appender.GetEvents().Length, Is.EqualTo(0), "Query is expected to be retrieved from cache");
+			}
+		}
+
 		[Test, Obsolete]
 		public void FetchModeEagerForLazy()
 		{
@@ -541,7 +694,7 @@ namespace NHibernate.Test.Criteria.SelectModeTest
 		private void SkipFutureTestIfNotSupported()
 		{
 			if (Sfi.ConnectionProvider.Driver.SupportsMultipleQueries == false)
-				Assert.Ignore("Driver {0} does not support multi-queries", Sfi.ConnectionProvider.Driver.GetType().FullName);
+				Assert.Ignore($"Driver {Sfi.ConnectionProvider.Driver.GetType().FullName} does not support multi-queries");
 		}
 
 		#region Test Setup
@@ -572,7 +725,16 @@ namespace NHibernate.Test.Criteria.SelectModeTest
 
 					rc.Property(x => x.Name);
 
-					rc.Property(ep => ep.LazyProp, m => m.Lazy(true));
+					rc.Property(ep => ep.LazyProp, m =>
+					{
+						m.Lazy(true);
+						m.FetchGroup("LazyGroup");
+					});
+					rc.Property(ep => ep.LazyProp2, m =>
+					{
+						m.Lazy(true);
+						m.FetchGroup("LazyGroup2");
+					});
 
 					rc.ManyToOne(
 						ep => ep.Child1,
@@ -593,7 +755,7 @@ namespace NHibernate.Test.Criteria.SelectModeTest
 						m.Column("SameTypeChildId");
 						m.ForeignKey("none");
 					});
-					MapList(rc, ep => ep.ChildrenList);
+					MapList(rc, ep => ep.ChildrenList, mapper: m => m.OrderBy("OrderIdx desc"));
 					MapList(rc, ep => ep.ChildrenListEmpty);
 				});
 
@@ -601,7 +763,11 @@ namespace NHibernate.Test.Criteria.SelectModeTest
 				mapper,
 				default(EntitySimpleChild),
 				c => c.Children,
-				rc => { rc.Property(sc => sc.LazyProp, mp => mp.Lazy(true)); });
+				rc =>
+				{
+					rc.Property(sc => sc.LazyProp, mp => mp.Lazy(true));
+					rc.Property(sc => sc.OrderIdx);
+				});
 			MapSimpleChild(mapper, default(Level2Child), c => c.Children);
 			MapSimpleChild<Level3Child>(mapper);
 
@@ -629,7 +795,7 @@ namespace NHibernate.Test.Criteria.SelectModeTest
 				});
 		}
 
-		private static void MapList<TParent, TElement>(IClassMapper<TParent> rc, Expression<Func<TParent, IEnumerable<TElement>>> expression, CollectionFetchMode fetchMode =  null) where TParent : class
+		private static void MapList<TParent, TElement>(IClassMapper<TParent> rc, Expression<Func<TParent, IEnumerable<TElement>>> expression, CollectionFetchMode fetchMode =  null, Action<IBagPropertiesMapper<TParent, TElement>> mapper = null) where TParent : class
 		{
 			rc.Bag(
 				expression,
@@ -644,13 +810,13 @@ namespace NHibernate.Test.Criteria.SelectModeTest
 									ckm.Name("ParentId");
 								});
 							km.ForeignKey("none");
-
 						});
 					m.Cascade(Mapping.ByCode.Cascade.All);
 					if (fetchMode != null)
 					{
 						m.Fetch(fetchMode);
 					}
+					mapper?.Invoke(m);
 				},
 				a => a.OneToMany());
 		}
@@ -713,7 +879,8 @@ namespace NHibernate.Test.Criteria.SelectModeTest
 								},
 							}
 						}
-					}
+					},
+					OrderIdx = 100
 				};
 
 				var child2 = new EntitySimpleChild
@@ -722,17 +889,31 @@ namespace NHibernate.Test.Criteria.SelectModeTest
 					LazyProp = "LazyFromSimpleChild2",
 				};
 
+				var child3 = new EntitySimpleChild
+				{
+					Name = "Child3",
+					OrderIdx = 0
+				};
+				var child4 = new EntitySimpleChild
+				{
+					Name = "Child4",
+					OrderIdx = 50
+				};
+
 				var parent = new EntityComplex
 				{
 					Name = "ComplexEntityParent",
 					Child1 = child1,
 					Child2 = child2,
 					LazyProp = "SomeBigValue",
+					LazyProp2 = "SomeBigValue2",
 					SameTypeChild = new EntityComplex()
 					{
-						Name = "ComplexEntityChild"
+						Name = "ComplexEntityChild",
+						LazyProp = "LazyProp1",
+						LazyProp2 = "LazyProp2",
 					},
-					ChildrenList = new List<EntitySimpleChild> {child1},
+					ChildrenList = new List<EntitySimpleChild> {child3, child1, child4 },
 					ChildrenListEmpty = new List<EntityComplex> { },
 				};
 				session.Save(new EntityEager()

@@ -33,7 +33,12 @@ namespace NHibernate.DomainModel.Northwind.Entities
         {
             get { return _session.Query<Order>(); }
         }
-		
+
+        public IQueryable<CompositeOrder> CompositeOrders
+        {
+            get { return _session.Query<CompositeOrder>(); }
+        }
+
         public IQueryable<OrderLine> OrderLines
         {
             get { return _session.Query<OrderLine>(); }
@@ -54,10 +59,10 @@ namespace NHibernate.DomainModel.Northwind.Entities
             get { return _session.Query<Timesheet>(); }
         }
 
-    	public IQueryable<Animal> Animals
-    	{
-			get { return _session.Query<Animal>(); }
-    	}
+        public IQueryable<Animal> Animals
+        {
+            get { return _session.Query<Animal>(); }
+        }
 
         public IQueryable<Mammal> Mammals
         {
@@ -67,6 +72,16 @@ namespace NHibernate.DomainModel.Northwind.Entities
         public IQueryable<User> Users
         {
             get { return _session.Query<User>(); }
+        }
+
+        public IQueryable<NumericEntity> NumericEntities
+        {
+            get { return _session.Query<NumericEntity>(); }
+        }
+
+        public IQueryable<DynamicUser> DynamicUsers
+        {
+            get { return _session.Query<DynamicUser>(); }
         }
 
         public IQueryable<PatientRecord> PatientRecords
@@ -94,9 +109,14 @@ namespace NHibernate.DomainModel.Northwind.Entities
             get { return _session.Query<Role>(); }
         }
 
-        public IEnumerable<IUser> IUsers
+        public IQueryable<IUser> IUsers
         {
             get { return _session.Query<IUser>(); }
+        }
+        
+        public IQueryable<AnotherEntity> AnotherEntity
+        {
+            get { return _session.Query<AnotherEntity>(); }
         }
     }
 }

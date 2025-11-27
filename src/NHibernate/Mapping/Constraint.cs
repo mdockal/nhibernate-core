@@ -15,7 +15,7 @@ namespace NHibernate.Mapping
 	public abstract class Constraint : IRelationalModel
 	{
 		private string name;
-		private readonly List<Column> columns = new List<Column>();
+		private readonly List<Column> columns = new List<Column>(1);
 		private Table table;
 
 		/// <summary>
@@ -91,9 +91,13 @@ namespace NHibernate.Mapping
 		{
 			foreach (Column col in columnIterator)
 			{
-				if (!col.IsFormula)
-					AddColumn(col);
+				AddColumn(col);
 			}
+		}
+
+		public void AddColumns(IEnumerable<ISelectable> columnIterator)
+		{
+			AddColumns(columnIterator.OfType<Column>());
 		}
 
 		/// <summary>

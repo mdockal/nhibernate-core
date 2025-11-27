@@ -19,7 +19,7 @@ namespace NHibernate.SqlCommand
 		private string comment;
 
 		// columns-> (ColumnName, Value) or (ColumnName, SqlType) for parametrized column
-		private readonly LinkedHashMap<string, object> columns = new LinkedHashMap<string, object>();
+		private readonly LinkHashMap<string, object> columns = new();
 
 	    private List<SqlString> whereStrings = new List<SqlString>();
 		private readonly List<SqlType> whereParameterTypes = new List<SqlType>();
@@ -47,11 +47,12 @@ namespace NHibernate.SqlCommand
 		/// <param name="val">The value to set for the column.</param>
 		/// <param name="literalType">The NHibernateType to use to convert the value to a sql string.</param>
 		/// <returns>The SqlUpdateBuilder.</returns>
+		// Since v5.6
+		[Obsolete("This method is unsafe and has no more usages. Use the overload with a property type and use a parameterized query.")]
 		public SqlUpdateBuilder AddColumn(string columnName, object val, ILiteralType literalType)
 		{
 			return AddColumn(columnName, literalType.ObjectToSQLString(val, Dialect));
 		}
-
 
 		/// <summary>
 		/// Add a column with a specific value to the UPDATE sql
@@ -134,7 +135,7 @@ namespace NHibernate.SqlCommand
 		public SqlUpdateBuilder AppendAssignmentFragment(SqlString fragment)
 		{
 			// SqlString is immutable
-			assignments = assignments == null ? fragment : assignments.Append(", ").Append(fragment);
+			assignments = assignments == null ? fragment : assignments.Append(", ", fragment);
 			return this;
 		}
 
@@ -301,7 +302,6 @@ namespace NHibernate.SqlCommand
 					sqlBuilder.Add(StringHelper.CommaSpace);
 				commaNeeded = true;
 
-
 				sqlBuilder.Add(valuePair.Key)
 					.Add(" = ");
 
@@ -320,7 +320,6 @@ namespace NHibernate.SqlCommand
 				}
 				sqlBuilder.Add(assignments);
 			}
-
 
 			sqlBuilder.Add(" WHERE ");
 			bool andNeeded = false;
@@ -359,7 +358,8 @@ namespace NHibernate.SqlCommand
 		public SqlCommandInfo ToSqlCommandInfo()
 		{
 			SqlString text = ToSqlString();
-			List<SqlType> parameterTypes = new List<SqlType>(new SafetyEnumerable<SqlType>(columns.Values));
+
+			var parameterTypes = columns.Values.OfType<SqlType>().ToList(); 
 			parameterTypes.AddRange(whereParameterTypes);
 			return new SqlCommandInfo(text, parameterTypes.ToArray());
 		}

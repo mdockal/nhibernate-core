@@ -39,7 +39,7 @@ namespace NHibernate.Linq.Visitors
 			if (!_joins.TryGetValue(key, out join))
 			{
 				join = new NhJoinClause(_nameGenerator.GetNewName(), expression.Type, expression);
-				_queryModel.BodyClauses.Add(join);
+				AddJoin(_queryModel, join);
 				_joins.Add(key, join);
 			}
 
@@ -70,6 +70,11 @@ namespace NHibernate.Linq.Visitors
 
 			var resultOperatorBase = source as ResultOperatorBase;
 			return resultOperatorBase != null && _queryModel.ResultOperators.Contains(resultOperatorBase);
+		}
+
+		private void AddJoin(QueryModel queryModel, NhJoinClause joinClause)
+		{
+			queryModel.BodyClauses.Add(joinClause);
 		}
 
 		private class QuerySourceExtractor : RelinqExpressionVisitor

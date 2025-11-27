@@ -22,12 +22,13 @@ using NHibernate.Linq;
 using NHibernate.Loader;
 using NHibernate.Persister.Collection;
 using NHibernate.Type;
+using NHibernate.Util;
 
 namespace NHibernate.Collection.Generic
 {
 	using System.Threading.Tasks;
 	using System.Threading;
-	public partial class PersistentIdentifierBag<T> : AbstractPersistentCollection, IList<T>, IList, IQueryable<T>
+	public partial class PersistentIdentifierBag<T> : AbstractPersistentCollection, IList<T>, IReadOnlyList<T>, IList, IQueryable<T>
 	{
 
 		/// <summary>
@@ -43,10 +44,28 @@ namespace NHibernate.Collection.Generic
 			object[] array = (object[])disassembled;
 			int size = array.Length;
 			BeforeInitialize(persister, size);
+
+			var identifierType = persister.IdentifierType;
+			var elementType = persister.ElementType;
+			await (BeforeAssembleAsync(identifierType, elementType, array, cancellationToken)).ConfigureAwait(false);
+
 			for (int i = 0; i < size; i += 2)
 			{
-				_identifiers[i / 2] = await (persister.IdentifierType.AssembleAsync(array[i], Session, owner, cancellationToken)).ConfigureAwait(false);
-				_values.Add((T) await (persister.ElementType.AssembleAsync(array[i + 1], Session, owner, cancellationToken)).ConfigureAwait(false));
+				_identifiers[i / 2] = await (identifierType.AssembleAsync(array[i], Session, owner, cancellationToken)).ConfigureAwait(false);
+				_values.Add((T) await (elementType.AssembleAsync(array[i + 1], Session, owner, cancellationToken)).ConfigureAwait(false));
+			}
+		}
+
+		private async Task BeforeAssembleAsync(IType identifierType, IType elementType, object[] array, CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (Session.PersistenceContext.BatchFetchQueue.QueryCacheQueue != null)
+				return;
+
+			for (int i = 0; i < array.Length; i += 2)
+			{
+				await (identifierType.BeforeAssembleAsync(array[i], Session, cancellationToken)).ConfigureAwait(false);
+				await (elementType.BeforeAssembleAsync(array[i + 1], Session, cancellationToken)).ConfigureAwait(false);
 			}
 		}
 
@@ -155,6 +174,9 @@ namespace NHibernate.Collection.Generic
 			return element;
 		}
 
+		//Since 5.3
+		/// <inheritdoc />
+		[Obsolete("This method has no more usages and will be removed in a future version")]
 		public override Task<ICollection> GetOrphansAsync(object snapshot, string entityName, CancellationToken cancellationToken)
 		{
 			if (cancellationToken.IsCancellationRequested)
@@ -163,8 +185,7 @@ namespace NHibernate.Collection.Generic
 			}
 			try
 			{
-				var sn = (ISet<SnapshotElement>)GetSnapshot();
-				return GetOrphansAsync(sn.Select(x => x.Value).ToArray(), (ICollection) _values, entityName, Session, cancellationToken);
+				return Task.FromResult<ICollection>(GetOrphans(snapshot, entityName));
 			}
 			catch (Exception ex)
 			{

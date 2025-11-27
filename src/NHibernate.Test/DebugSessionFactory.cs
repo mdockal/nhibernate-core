@@ -16,6 +16,7 @@ using NHibernate.Exceptions;
 using NHibernate.Id;
 using NHibernate.Impl;
 using NHibernate.Metadata;
+using NHibernate.MultiTenancy;
 using NHibernate.Persister.Collection;
 using NHibernate.Persister.Entity;
 using NHibernate.Proxy;
@@ -30,25 +31,30 @@ namespace NHibernate.Test
 	/// it is used when testing to check that tests clean up after themselves.
 	/// </summary>
 	/// <remarks>Sessions opened from other sessions are not tracked.</remarks>
+	[Serializable]
 	public partial class DebugSessionFactory : ISessionFactoryImplementor
 	{
+		[NonSerialized]
+		private DebugConnectionProvider _debugConnectionProvider;
+
 		/// <summary>
 		/// The debug connection provider if configured for using it, <see langword="null"/> otherwise.
 		/// Use <c>ActualFactory.ConnectionProvider</c> if needing unconditionally the connection provider, be
 		/// it debug or not.
 		/// </summary>
-		public DebugConnectionProvider DebugConnectionProvider { get; }
+		public DebugConnectionProvider DebugConnectionProvider
+			=> _debugConnectionProvider ??= ActualFactory.ConnectionProvider as DebugConnectionProvider;
 		public ISessionFactoryImplementor ActualFactory { get; }
 
 		public EventListeners EventListeners => ((SessionFactoryImpl)ActualFactory).EventListeners;
 
-		private readonly ConcurrentBag<ISessionImplementor> _openedSessions = new ConcurrentBag<ISessionImplementor>();
+		[NonSerialized]
+		private readonly ConcurrentQueue<ISessionImplementor> _openedSessions = new();
 		private static readonly ILog _log = LogManager.GetLogger(typeof(DebugSessionFactory).Assembly, typeof(TestCase));
 
 		public DebugSessionFactory(ISessionFactory actualFactory)
 		{
 			ActualFactory = (ISessionFactoryImplementor)actualFactory;
-			DebugConnectionProvider = ActualFactory.ConnectionProvider as DebugConnectionProvider;
 		}
 
 		#region Session tracking
@@ -56,29 +62,43 @@ namespace NHibernate.Test
 		public bool CheckSessionsWereClosed()
 		{
 			var allClosed = true;
+			var number = 1;
 			foreach (var session in _openedSessions)
 			{
-				// Do not inverse, we want to close all of them.
-				allClosed = CheckSessionWasClosed(session) && allClosed;
+				var wasClosed = CheckSessionWasClosed(session);
+				// No early exit out of the loop: we want to close all forgotten sessions.
+				if (!wasClosed)
+				{
+					_log.ErrorFormat("Test case didn't close session {0}, n°{1} of {2}, closing.",
+						session.SessionId, number, _openedSessions.Count);
+				}
+				allClosed = wasClosed && allClosed;
+
 				// Catches only session opened from another one while sharing the connection. Those
 				// opened without sharing the connection stay un-monitored.
 				foreach (var dependentSession in session.ConnectionManager.DependentSessions.ToList())
 				{
-					allClosed = CheckSessionWasClosed(dependentSession) && allClosed;
+					wasClosed = CheckSessionWasClosed(dependentSession);
+					if (!wasClosed)
+					{
+						_log.ErrorFormat("Test case didn't close dependent session {0} of the session {3}, n°{1} of {2}, closing.",
+							dependentSession.SessionId, number, _openedSessions.Count, session.SessionId);
+					}
+					allClosed = wasClosed && allClosed;
 				}
+				number++;
 			}
 
 			return allClosed;
 		}
 
-		private bool CheckSessionWasClosed(ISessionImplementor session)
+		private static bool CheckSessionWasClosed(ISessionImplementor session)
 		{
 			session.TransactionContext?.Wait();
 
 			if (!session.IsOpen)
 				return true;
 
-			_log.Error($"Test case didn't close session {session.SessionId}, closing");
 			(session as ISession)?.Close();
 			(session as IStatelessSession)?.Close();
 			return false;
@@ -94,7 +114,7 @@ namespace NHibernate.Test
 #pragma warning disable CS0618 // Type or member is obsolete
 			var s = ActualFactory.OpenSession(connection);
 #pragma warning restore CS0618 // Type or member is obsolete
-			_openedSessions.Add(s.GetSessionImplementation());
+			_openedSessions.Enqueue(s.GetSessionImplementation());
 			return s;
 		}
 
@@ -103,7 +123,7 @@ namespace NHibernate.Test
 #pragma warning disable CS0618 // Type or member is obsolete
 			var s = ActualFactory.OpenSession(sessionLocalInterceptor);
 #pragma warning restore CS0618 // Type or member is obsolete
-			_openedSessions.Add(s.GetSessionImplementation());
+			_openedSessions.Enqueue(s.GetSessionImplementation());
 			return s;
 		}
 
@@ -112,14 +132,14 @@ namespace NHibernate.Test
 #pragma warning disable CS0618 // Type or member is obsolete
 			var s = ActualFactory.OpenSession(conn, sessionLocalInterceptor);
 #pragma warning restore CS0618 // Type or member is obsolete
-			_openedSessions.Add(s.GetSessionImplementation());
+			_openedSessions.Enqueue(s.GetSessionImplementation());
 			return s;
 		}
 
 		ISession ISessionFactory.OpenSession()
 		{
 			var s = ActualFactory.OpenSession();
-			_openedSessions.Add(s.GetSessionImplementation());
+			_openedSessions.Enqueue(s.GetSessionImplementation());
 			return s;
 		}
 
@@ -131,14 +151,14 @@ namespace NHibernate.Test
 		IStatelessSession ISessionFactory.OpenStatelessSession()
 		{
 			var s = ActualFactory.OpenStatelessSession();
-			_openedSessions.Add(s.GetSessionImplementation());
+			_openedSessions.Enqueue(s.GetSessionImplementation());
 			return s;
 		}
 
 		IStatelessSession ISessionFactory.OpenStatelessSession(DbConnection connection)
 		{
 			var s = ActualFactory.OpenStatelessSession(connection);
-			_openedSessions.Add(s.GetSessionImplementation());
+			_openedSessions.Enqueue(s.GetSessionImplementation());
 			return s;
 		}
 
@@ -151,7 +171,7 @@ namespace NHibernate.Test
 #pragma warning disable CS0618 // Type or member is obsolete
 			var s = ActualFactory.OpenSession(connection, flushBeforeCompletionEnabled, autoCloseSessionEnabled, connectionReleaseMode);
 #pragma warning restore CS0618 // Type or member is obsolete
-			_openedSessions.Add(s.GetSessionImplementation());
+			_openedSessions.Enqueue(s.GetSessionImplementation());
 			return s;
 		}
 
@@ -309,6 +329,16 @@ namespace NHibernate.Test
 			return ActualFactory.GetCollectionPersister(role);
 		}
 
+		public ISet<IEntityPersister> GetEntityPersisters(ISet<string> spaces)
+		{
+			return ActualFactory.GetEntityPersisters(spaces);
+		}
+
+		public ISet<ICollectionPersister> GetCollectionPersisters(ISet<string> spaces)
+		{
+			return ActualFactory.GetCollectionPersisters(spaces);
+		}
+
 		IType[] ISessionFactoryImplementor.GetReturnTypes(string queryString)
 		{
 			return ActualFactory.GetReturnTypes(queryString);
@@ -394,7 +424,9 @@ namespace NHibernate.Test
 				(ISessionCreationOptions)sessionBuilder;
 		}
 
-		internal class SessionBuilder : ISessionBuilder
+		internal class SessionBuilder : ISessionBuilder,
+			//TODO 6.0: Remove interface with implementation (will be replaced TenantConfiguration ISessionBuilder method)
+			ISessionCreationOptionsWithMultiTenancy
 		{
 			private readonly ISessionBuilder _actualBuilder;
 			private readonly DebugSessionFactory _debugFactory;
@@ -410,7 +442,7 @@ namespace NHibernate.Test
 			ISession ISessionBuilder<ISessionBuilder>.OpenSession()
 			{
 				var s = _actualBuilder.OpenSession();
-				_debugFactory._openedSessions.Add(s.GetSessionImplementation());
+				_debugFactory._openedSessions.Enqueue(s.GetSessionImplementation());
 				return s;
 			}
 
@@ -459,9 +491,17 @@ namespace NHibernate.Test
 			}
 
 			#endregion
+
+			TenantConfiguration ISessionCreationOptionsWithMultiTenancy.TenantConfiguration
+			{
+				get => (_actualBuilder as ISessionCreationOptionsWithMultiTenancy)?.TenantConfiguration;
+				set => _actualBuilder.Tenant(value);
+			}
 		}
 
-		internal class StatelessSessionBuilder : IStatelessSessionBuilder
+		internal class StatelessSessionBuilder : IStatelessSessionBuilder,
+			//TODO 6.0: Remove interface with implementation (will be replaced TenantConfiguration IStatelessSessionBuilder method)
+			ISessionCreationOptionsWithMultiTenancy
 		{
 			private readonly IStatelessSessionBuilder _actualBuilder;
 			private readonly DebugSessionFactory _debugFactory;
@@ -477,7 +517,7 @@ namespace NHibernate.Test
 			IStatelessSession IStatelessSessionBuilder.OpenStatelessSession()
 			{
 				var s = _actualBuilder.OpenStatelessSession();
-				_debugFactory._openedSessions.Add(s.GetSessionImplementation());
+				_debugFactory._openedSessions.Enqueue(s.GetSessionImplementation());
 				return s;
 			}
 
@@ -493,6 +533,12 @@ namespace NHibernate.Test
 			{
 				_actualBuilder.AutoJoinTransaction(autoJoinTransaction);
 				return this;
+			}
+
+			TenantConfiguration ISessionCreationOptionsWithMultiTenancy.TenantConfiguration
+			{
+				get => (_actualBuilder as ISessionCreationOptionsWithMultiTenancy)?.TenantConfiguration;
+				set => _actualBuilder.Tenant(value);
 			}
 
 			#endregion

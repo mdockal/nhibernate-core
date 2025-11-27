@@ -23,7 +23,6 @@ using Environment = NHibernate.Cfg.Environment;
 namespace NHibernate.Test.Pagination
 {
 	using System.Threading.Tasks;
-	using System.Threading;
 	[TestFixture]
 	public class CustomDialectFixtureAsync : TestCase
 	{
@@ -42,12 +41,12 @@ namespace NHibernate.Test.Pagination
 			// Configure is called before Applies, must check here.
 			if (!(Dialect is MsSql2005Dialect))
 				Assert.Ignore("Test is for SQL dialect only");
-			var driverClass = ReflectHelper.ClassForName(cfg.GetProperty(Environment.ConnectionDriver));
+			var driverClass = ReflectHelper.ClassForName(configuration.GetProperty(Environment.ConnectionDriver));
 			if (!typeof(SqlClientDriver).IsAssignableFrom(driverClass))
 				Assert.Ignore("Test is compatible only with Sql Server Client driver connection strings");
 
-			cfg.SetProperty(Environment.Dialect, typeof(CustomMsSqlDialect).AssemblyQualifiedName);
-			cfg.SetProperty(Environment.ConnectionDriver, typeof(CustomMsSqlDriver).AssemblyQualifiedName);
+			configuration.SetProperty(Environment.Dialect, typeof(CustomMsSqlDialect).AssemblyQualifiedName);
+			configuration.SetProperty(Environment.ConnectionDriver, typeof(CustomMsSqlDriver).AssemblyQualifiedName);
 		}
 
 		private CustomMsSqlDialect CustomDialect
@@ -80,7 +79,6 @@ namespace NHibernate.Test.Pagination
 
 		protected override void OnTearDown()
 		{
-
 			using (ISession s = OpenSession())
 			using (ITransaction t = s.BeginTransaction())
 			{
@@ -154,7 +152,7 @@ namespace NHibernate.Test.Pagination
 						  .SetFirstResult(1)
 						  .SetMaxResults(2));
 
-				var points = await (query.GetResultAsync<DataPoint>(0, CancellationToken.None));
+				var points = await (query.GetResultAsync<DataPoint>(0));
 
 				Assert.That(points.Count, Is.EqualTo(2));
 				Assert.That(points[0].X, Is.EqualTo(7d));

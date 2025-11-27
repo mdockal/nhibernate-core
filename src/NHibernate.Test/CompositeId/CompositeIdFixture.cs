@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Linq;
 using NHibernate.Dialect;
 using NUnit.Framework;
 
@@ -20,14 +21,9 @@ namespace NHibernate.Test.CompositeId
 				return new string[]
 				       	{
 				       		"CompositeId.Customer.hbm.xml", "CompositeId.Order.hbm.xml", "CompositeId.LineItem.hbm.xml",
-				       		"CompositeId.Product.hbm.xml"
+				       		"CompositeId.Product.hbm.xml", "CompositeId.Shipper.hbm.xml"
 				       	};
 			}
-		}
-
-		protected override string CacheConcurrencyStrategy
-		{
-			get { return null; }
 		}
 
 		protected override bool AppliesTo(Dialect.Dialect dialect)
@@ -68,9 +64,13 @@ namespace NHibernate.Test.CompositeId
 
 				Order o = new Order(c);
 				o.OrderDate = DateTime.Today;
+				o.Shipper = new Shipper() { Id = new NullableId(null, 13) };
+				s.Persist(o);
+				
 				LineItem li = new LineItem(o, p);
 				li.Quantity = 2;
-
+				s.Persist(li);
+				
 				t.Commit();
 			}
 
@@ -127,7 +127,19 @@ namespace NHibernate.Test.CompositeId
 				t.Commit();
 			}
 
-			
+			using (s = OpenSession())
+			{
+				t = s.BeginTransaction();
+				var noShippersForWarehouse = s.Query<Order>()
+					// NOTE: .Where(x => x.Shipper.Id == new NullableId(null, 13)) improperly renders
+					// "where (ShipperId = @p1 and WarehouseId = @p2)" with @p1 = NULL (needs to be is null)
+					// But the effort to fix is pretty high due to how component tuples are managed in linq / hql.
+					.Where(x => x.Shipper.Id.WarehouseId == 13 && x.Shipper.Id.Id == null)
+					.ToList();
+				Assert.AreEqual(1, noShippersForWarehouse.Count);
+				t.Commit();
+			}
+
 			using (s = OpenSession())
 			{
 				t = s.BeginTransaction();
@@ -192,8 +204,8 @@ namespace NHibernate.Test.CompositeId
 			Assert.AreEqual(2, c.Orders.Count);
 			Assert.IsTrue(NHibernateUtil.IsInitialized(((Order) c.Orders[0]).LineItems));
 			Assert.IsTrue(NHibernateUtil.IsInitialized(((Order) c.Orders[1]).LineItems));
-			Assert.AreEqual(((Order) c.Orders[0]).LineItems.Count, 2);
-			Assert.AreEqual(((Order) c.Orders[1]).LineItems.Count, 2);
+			Assert.AreEqual(2, ((Order) c.Orders[0]).LineItems.Count);
+			Assert.AreEqual(2, ((Order) c.Orders[1]).LineItems.Count);
 			t.Commit();
 			s.Close();
 
@@ -285,6 +297,25 @@ namespace NHibernate.Test.CompositeId
 			s.CreateQuery("from LineItem ol where ol.Order.Id.CustomerId = 'C111'").List();
 			t.Commit();
 			s.Close();
+		}
+
+		[Test(Description = "GH-2646")]
+		public void AnyOnCompositeId()
+		{
+			using (var s = OpenSession())
+			{
+				s.Query<Order>().Where(o => o.LineItems.Any()).ToList();
+				s.Query<Order>().Select(o => o.LineItems.Any()).ToList();
+			}
+		}
+
+		public void NullCompositeId()
+		{
+			using (var s = OpenSession())
+			{
+				s.Query<Order>().Where(o => o.LineItems.Any()).ToList();
+				s.Query<Order>().Select(o => o.LineItems.Any()).ToList();
+			}
 		}
 	}
 }

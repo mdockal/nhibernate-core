@@ -1,4 +1,3 @@
-
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -13,10 +12,8 @@ using NUnit.Framework;
 
 namespace NHibernate.Test.Criteria.Lambda
 {
-
 	public class LambdaFixtureBase
 	{
-
 		private Hashtable _visitedObjects = new Hashtable();
 		private Stack<string> _fieldPath = new Stack<string>();
 
@@ -84,7 +81,7 @@ namespace NHibernate.Test.Criteria.Lambda
 			foreach (object key in expected.Keys)
 			{
 				if (!actual.Contains(key))
-					Assert.AreEqual(key, null, _fieldPath.Peek() + "[" + key.ToString() + "]");
+					Assert.AreEqual(null, key, _fieldPath.Peek() + "[" + key.ToString() + "]");
 
 				AssertObjectsAreEqual(expected[key], actual[key], "[" + key.ToString() + "]");
 			}
@@ -184,7 +181,5 @@ namespace NHibernate.Test.Criteria.Lambda
 			_fieldPath.Clear();
 			AssertObjectsAreEqual(expected, actual, expected.GetType().Name);
 		}
-
 	}
-
 }

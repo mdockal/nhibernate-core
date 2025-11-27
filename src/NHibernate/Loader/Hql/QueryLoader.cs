@@ -20,7 +20,7 @@ using IQueryable = NHibernate.Persister.Entity.IQueryable;
 namespace NHibernate.Loader.Hql
 {
 	[CLSCompliant(false)]
-	public partial class QueryLoader : BasicLoader
+	public partial class QueryLoader : BasicLoader, IQueryLoader
 	{
 		private readonly QueryTranslatorImpl _queryTranslator;
 
@@ -33,6 +33,7 @@ namespace NHibernate.Loader.Hql
 		private string[] _collectionSuffixes;
 		private IQueryable[] _entityPersisters;
 		private bool[] _entityEagerPropertyFetches;
+		private HashSet<string>[] _entityFetchLazyProperties;
 		private string[] _entityAliases;
 		private string[] _sqlAliases;
 		private string[] _sqlAliasSuffixes;
@@ -42,6 +43,8 @@ namespace NHibernate.Loader.Hql
 		private readonly NullableDictionary<string, string> _sqlAliasByEntityAlias = new NullableDictionary<string, string>();
 		private int _selectLength;
 		private LockMode[] _defaultLockModes;
+		private ISet<ICollectionPersister> _uncacheableCollectionPersisters;
+		private IReadOnlyDictionary<int, int> _entityByResultTypeDic;
 
 		public QueryLoader(QueryTranslatorImpl queryTranslator, ISessionFactoryImplementor factory, SelectClause selectClause)
 			: base(factory)
@@ -105,6 +108,11 @@ namespace NHibernate.Loader.Hql
 			get { return _sqlAliases; }
 		}
 
+		public override bool IsCacheable(QueryParameters queryParameters)
+		{
+			return IsCacheable(queryParameters, _queryTranslator.SupportsQueryCache, _queryTranslator.Persisters);
+		}
+
 		protected override int[] CollectionOwners
 		{
 			get { return _collectionOwners; }
@@ -113,6 +121,11 @@ namespace NHibernate.Loader.Hql
 		protected override bool[] EntityEagerPropertyFetches
 		{
 			get { return _entityEagerPropertyFetches; }
+		}
+
+		protected override ISet<string>[] EntityFetchLazyProperties
+		{
+			get { return _entityFetchLazyProperties; }
 		}
 
 		protected override EntityType[] OwnerAssociationTypes
@@ -189,7 +202,7 @@ namespace NHibernate.Loader.Hql
 			get { return _collectionSuffixes; }
 		}
 
-		protected override ICollectionPersister[] CollectionPersisters
+		protected internal override ICollectionPersister[] CollectionPersisters
 		{
 			get { return _collectionPersisters; }
 		}
@@ -197,6 +210,7 @@ namespace NHibernate.Loader.Hql
 		private void Initialize(SelectClause selectClause)
 		{
 			IList<FromElement> fromElementList = selectClause.FromElementsForLoad;
+			_entityByResultTypeDic = selectClause.EntityByResultTypeDic;
 
 			_hasScalars = selectClause.IsScalarSelect;
 			_scalarColumnNames = selectClause.ColumnNames;
@@ -228,6 +242,7 @@ namespace NHibernate.Loader.Hql
 			int size = fromElementList.Count;
 			_entityPersisters = new IQueryable[size];
 			_entityEagerPropertyFetches = new bool[size];
+			_entityFetchLazyProperties = new HashSet<string>[size];
 			_entityAliases = new String[size];
 			_sqlAliases = new String[size];
 			_sqlAliasSuffixes = new String[size];
@@ -246,11 +261,13 @@ namespace NHibernate.Loader.Hql
 				}
 
 				_entityEagerPropertyFetches[i] = element.IsAllPropertyFetch;
-				_sqlAliases[i] = element.TableAlias;
+				_entityFetchLazyProperties[i] = element.FetchLazyProperties != null
+					? new HashSet<string>(element.FetchLazyProperties)
+					: null;
+				_sqlAliases[i] = element.ParentFromElement?.TableAlias ?? element.TableAlias;
 				_entityAliases[i] = element.ClassAlias;
 				_sqlAliasByEntityAlias.Add(_entityAliases[i], _sqlAliases[i]);
-				// TODO should we just collect these like with the collections above?
-				_sqlAliasSuffixes[i] = (size == 1) ? "" : i + "_";
+				_sqlAliasSuffixes[i] = element.EntitySuffix;
 				//			sqlAliasSuffixes[i] = element.getColumnAliasSuffix();
 				_includeInSelect[i] = !element.IsFetch;
 				if (_includeInSelect[i])
@@ -267,18 +284,16 @@ namespace NHibernate.Loader.Hql
 					}
 					else if (element.DataType.IsEntityType)
 					{
-						var entityType = (EntityType) element.DataType;
-						if (entityType.IsOneToOne)
-						{
-							_owners[i] = fromElementList.IndexOf(element.Origin);
-						}
-						_ownerAssociationTypes[i] = entityType;
+						_owners[i] = fromElementList.IndexOf(element.Origin);
+						_ownerAssociationTypes[i] = (EntityType) element.DataType;
 					}
 				}
 			}
 
 			//NONE, because its the requested lock mode, not the actual! 
 			_defaultLockModes = ArrayHelper.Fill(LockMode.None, size);
+			_uncacheableCollectionPersisters = _queryTranslator.UncacheableCollectionPersisters;
+			CachePersistersWithCollections(ArrayHelper.IndexesOf(_includeInSelect, true));
 		}
 
 		public IList List(ISessionImplementor session, QueryParameters queryParameters)
@@ -315,6 +330,11 @@ namespace NHibernate.Loader.Hql
 			}
 		}
 
+		protected override bool IsCollectionPersisterCacheable(ICollectionPersister collectionPersister)
+		{
+			return !_uncacheableCollectionPersisters.Contains(collectionPersister);
+		}
+
 		protected override IResultTransformer ResolveResultTransformer(IResultTransformer resultTransformer)
 		{
 			return _selectNewTransformer ?? resultTransformer;
@@ -342,7 +362,9 @@ namespace NHibernate.Loader.Hql
 				resultRow = new object[queryCols];
 				for (int i = 0; i < queryCols; i++)
 				{
-					resultRow[i] = ResultTypes[i].NullSafeGet(rs, scalarColumns[i], session, null);
+					resultRow[i] = _entityByResultTypeDic.TryGetValue(i, out var rowIndex)
+						? row[rowIndex]
+						: ResultTypes[i].NullSafeGet(rs, scalarColumns[i], session, null);
 				}
 			}
 			else
@@ -407,15 +429,13 @@ namespace NHibernate.Loader.Hql
 		[Obsolete("Please use ResultTypes instead")]
 		public IType[] ReturnTypes => ResultTypes;
 
-		internal IEnumerable GetEnumerable(QueryParameters queryParameters, IEventSource session)
+		public IEnumerable GetEnumerable(QueryParameters queryParameters, IEventSource session)
 		{
 			CheckQuery(queryParameters);
-			bool statsEnabled = session.Factory.Statistics.IsStatisticsEnabled;
-
-			var stopWath = new Stopwatch();
-			if (statsEnabled)
+			Stopwatch stopWatch = null;
+			if (session.Factory.Statistics.IsStatisticsEnabled)
 			{
-				stopWath.Start();
+				stopWatch = Stopwatch.StartNew();
 			}
 
 			var cmd = PrepareQueryCommand(queryParameters, false, session);
@@ -427,13 +447,13 @@ namespace NHibernate.Loader.Hql
 			IEnumerable result = 
 				new EnumerableImpl(rs, cmd, session, queryParameters.IsReadOnly(session), _queryTranslator.ReturnTypes, _queryTranslator.GetColumnNames(), queryParameters.RowSelection, resultTransformer, _queryReturnAliases);
 
-			if (statsEnabled)
+			if (stopWatch != null)
 			{
-				stopWath.Stop();
-				session.Factory.StatisticsImplementor.QueryExecuted("HQL: " + _queryTranslator.QueryString, 0, stopWath.Elapsed);
+				stopWatch.Stop();
+				session.Factory.StatisticsImplementor.QueryExecuted("HQL: " + _queryTranslator.QueryString, 0, stopWatch.Elapsed);
 				// NH: Different behavior (H3.2 use QueryLoader in AST parser) we need statistic for orginal query too.
 				// probably we have a bug some where else for statistic RowCount
-				session.Factory.StatisticsImplementor.QueryExecuted(QueryIdentifier, 0, stopWath.Elapsed);
+				session.Factory.StatisticsImplementor.QueryExecuted(QueryIdentifier, 0, stopWatch.Elapsed);
 			}
 			return result;
 		}

@@ -54,6 +54,25 @@ PRIMARY KEY CLUSTERED
 )WITH (PAD_INDEX  = OFF, STATISTICS_NORECOMPUTE  = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS  = ON, ALLOW_PAGE_LOCKS  = ON) ON [PRIMARY]
 ) ON [PRIMARY]
 GO
+CREATE TABLE [dbo].[NumericEntity](
+	[Short] [smallint] IDENTITY(1,1) NOT NULL,
+	[NullableShort] [smallint] NULL,
+	[Integer] [int] NOT NULL,
+	[NullableInteger] [int] NULL,
+	[Long] [bigint] NOT NULL,
+	[NullableLong] [bigint] NULL,
+	[Decimal] [decimal](19, 5) NOT NULL,
+	[NullableDecimal] [decimal](19, 5) NULL,
+	[Single] [real] NOT NULL,
+	[NullableSingle] [real] NULL,
+	[Double] [float] NOT NULL,
+	[NullableDouble] [float] NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[Short] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY]
+GO
 INSERT [dbo].[Suppliers] ([SupplierId], [CompanyName], [ContactName], [ContactTitle], [HomePage], [Address], [City], [Region], [PostalCode], [Country], [Phone], [Fax]) VALUES (1, N'Exotic Liquids', N'Charlotte Cooper', N'Purchasing Manager', N'', N'49 Gilbert St.', N'London', N'', N'EC1 4SD', N'UK', N'(171) 555-2222', N'')
 INSERT [dbo].[Suppliers] ([SupplierId], [CompanyName], [ContactName], [ContactTitle], [HomePage], [Address], [City], [Region], [PostalCode], [Country], [Phone], [Fax]) VALUES (2, N'New Orleans Cajun Delights', N'Shelley Burke', N'Order Administrator', N'#CAJUN.HTM#', N'P.O. Box 78934', N'New Orleans', N'LA', N'70117', N'USA', N'(100) 555-4822', N'')
 INSERT [dbo].[Suppliers] ([SupplierId], [CompanyName], [ContactName], [ContactTitle], [HomePage], [Address], [City], [Region], [PostalCode], [Country], [Phone], [Fax]) VALUES (3, N'Grandma Kelly''s Homestead', N'Regina Murphy', N'Sales Representative', N'', N'707 Oxford Rd.', N'Ann Arbor', N'MI', N'48104', N'USA', N'(313) 555-5735', N'(313) 555-3349')
@@ -130,6 +149,8 @@ CREATE TABLE [dbo].[AnotherEntity](
 	[Id] [int] IDENTITY(1,1) NOT NULL,
 	[Output] [nvarchar](255) NULL,
 	[Input] [nvarchar](255) NULL,
+	[CompositeObjectId] INT NULL,
+	[CompositeTenantId] INT NULL,
 PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC
@@ -140,9 +161,27 @@ SET IDENTITY_INSERT [dbo].[AnotherEntity] ON
 INSERT [dbo].[AnotherEntity] ([Id], [Output]) VALUES (1, N'output')
 INSERT [dbo].[AnotherEntity] ([Id], [Input]) VALUES (2, N'input')
 INSERT [dbo].[AnotherEntity] ([Id], [Input], [Output]) VALUES (3, N'i/o', N'i/o')
-INSERT [dbo].[AnotherEntity] ([Id], [Input], [Output]) VALUES (4, N'input', N'output')
+INSERT [dbo].[AnotherEntity] ([Id], [Input], [Output], [CompositeObjectId], [CompositeTenantId]) VALUES (4, N'input', N'output', 1, 10)
 INSERT [dbo].[AnotherEntity] ([Id], [Input], [Output]) VALUES (5, NULL, NULL)
 SET IDENTITY_INSERT [dbo].[AnotherEntity] OFF
+/****** Object:  Table [dbo].[CompositeIdEntity] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[CompositeIdEntity](
+	[ObjectId] [int] NOT NULL,
+	[TenantId] [int] NOT NULL,
+	[Name] [nvarchar](128) NULL
+PRIMARY KEY CLUSTERED 
+(
+	[ObjectId] ASC,
+	[TenantId] ASC
+)WITH (PAD_INDEX  = OFF, STATISTICS_NORECOMPUTE  = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS  = ON, ALLOW_PAGE_LOCKS  = ON) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+INSERT [dbo].[CompositeIdEntity] ([ObjectId], [TenantId], [Name]) VALUES (1, 10, N'Jack Stephan')
+
 /****** Object:  Table [dbo].[Animal]    Script Date: 06/17/2010 13:08:54 ******/
 SET ANSI_NULLS ON
 GO
@@ -3774,6 +3813,8 @@ CREATE TABLE [dbo].[Users](
 	[Property1] [varchar](255) NULL,
 	[Property2] [varchar](255) NULL,
 	[OtherProperty1] [varchar](255) NULL,
+	[CreatedById] [int] NOT NULL,
+	[ModifiedById] [int] NULL
 PRIMARY KEY CLUSTERED 
 (
 	[UserId] ASC
@@ -3783,9 +3824,9 @@ GO
 SET ANSI_PADDING OFF
 GO
 SET IDENTITY_INSERT [dbo].[Users] ON
-INSERT [dbo].[Users] ([UserId], [Name], [InvalidLoginAttempts], [RegisteredAt], [LastLoginDate], [Enum1], [Enum2], [RoleId], [Property1], [Property2], [OtherProperty1]) VALUES (1, N'ayende', 4, CAST(0x00009D9800000000 AS DateTime), NULL, N'Medium', 1, 1, N'test1', N'test2', N'othertest1')
-INSERT [dbo].[Users] ([UserId], [Name], [InvalidLoginAttempts], [RegisteredAt], [LastLoginDate], [Enum1], [Enum2], [RoleId], [Property1], [Property2], [OtherProperty1]) VALUES (2, N'rahien', 5, CAST(0x00008D3E00000000 AS DateTime), NULL, N'Small', 0, 2, NULL, N'test2', NULL)
-INSERT [dbo].[Users] ([UserId], [Name], [InvalidLoginAttempts], [RegisteredAt], [LastLoginDate], [Enum1], [Enum2], [Features], [RoleId], [Property1], [Property2], [OtherProperty1]) VALUES (3, N'nhibernate', 6, CAST(0x00008EAC00000000 AS DateTime), CAST(0x00009D970110B41C AS DateTime), N'Medium', 0, 8, NULL, NULL, NULL, NULL)
+INSERT [dbo].[Users] ([UserId], [Name], [InvalidLoginAttempts], [RegisteredAt], [LastLoginDate], [Enum1], [Enum2], [RoleId], [Property1], [Property2], [OtherProperty1], [CreatedById], [ModifiedById]) VALUES (1, N'ayende', 4, CAST(0x00009D9800000000 AS DateTime), NULL, N'Medium', 1, 1, N'test1', N'test2', N'othertest1', 1, NULL)
+INSERT [dbo].[Users] ([UserId], [Name], [InvalidLoginAttempts], [RegisteredAt], [LastLoginDate], [Enum1], [Enum2], [RoleId], [Property1], [Property2], [OtherProperty1], [CreatedById], [ModifiedById]) VALUES (2, N'rahien', 5, CAST(0x00008D3E00000000 AS DateTime), NULL, N'Small', 0, 2, NULL, N'test2', NULL, 1, NULL)
+INSERT [dbo].[Users] ([UserId], [Name], [InvalidLoginAttempts], [RegisteredAt], [LastLoginDate], [Enum1], [Enum2], [Features], [RoleId], [Property1], [Property2], [OtherProperty1], [CreatedById], [ModifiedById]) VALUES (3, N'nhibernate', 6, CAST(0x00008EAC00000000 AS DateTime), CAST(0x00009D970110B41C AS DateTime), N'Medium', 0, 8, NULL, NULL, NULL, NULL, 1, NULL)
 SET IDENTITY_INSERT [dbo].[Users] OFF
 /****** Object:  Table [dbo].[TimeSheetUsers]    Script Date: 06/17/2010 13:08:54 ******/
 SET ANSI_NULLS ON
@@ -3931,6 +3972,12 @@ ALTER TABLE [dbo].[Roles]  WITH CHECK ADD  CONSTRAINT [FK1A2E670F36A436] FOREIGN
 REFERENCES [dbo].[AnotherEntity] ([Id])
 GO
 ALTER TABLE [dbo].[Roles] CHECK CONSTRAINT [FK1A2E670F36A436]
+GO
+/****** Object:  ForeignKey [FK_AnotherEntity_CompositeIdEntity] ******/
+ALTER TABLE [dbo].[AnotherEntity]  WITH CHECK ADD  CONSTRAINT [FK_AnotherEntity_CompositeIdEntity] FOREIGN KEY([CompositeObjectId], [CompositeTenantId])
+REFERENCES [dbo].[CompositeIdEntity] ([ObjectId], [TenantId])
+GO
+ALTER TABLE [dbo].[AnotherEntity] CHECK CONSTRAINT [FK_AnotherEntity_CompositeIdEntity]
 GO
 /****** Object:  ForeignKey [FK1A2E670F9E248253]    Script Date: 06/17/2010 13:08:54 ******/
 ALTER TABLE [dbo].[Roles]  WITH CHECK ADD  CONSTRAINT [FK1A2E670F9E248253] FOREIGN KEY([ParentId])

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data.Common;
 using System.Text;
 using NHibernate.AdoNet.Util;
+using NHibernate.Driver;
 using NHibernate.Exceptions;
 
 namespace NHibernate.AdoNet
@@ -17,8 +18,8 @@ namespace NHibernate.AdoNet
 		private int _countOfCommands;
 		private int _totalExpectedRowsAffected;
 		private DbCommand _currentBatch;
-		private IDictionary<string, List<object>> _parameterValueListHashTable;
-		private IDictionary<string, bool> _parameterIsAllNullsHashTable;
+		private Dictionary<string, List<object>> _parameterValueListHashTable;
+		private Dictionary<string, bool> _parameterIsAllNullsHashTable;
 		private StringBuilder _currentBatchCommandsLog;
 
 		public OracleDataClientBatchingBatcher(ConnectionManager connectionManager, IInterceptor interceptor)
@@ -156,9 +157,10 @@ namespace NHibernate.AdoNet
 		private void SetArrayBindCount(int arraySize)
 		{
 			//TODO: cache the property info.
-			var objType = _currentBatch.GetType();
+			var command = Driver.UnwrapDbCommand(_currentBatch);
+			var objType = command.GetType();
 			var propInfo = objType.GetProperty("ArrayBindCount");
-			propInfo.SetValue(_currentBatch, arraySize, null);
+			propInfo.SetValue(command, arraySize, null);
 		}
 
 		public override int BatchSize

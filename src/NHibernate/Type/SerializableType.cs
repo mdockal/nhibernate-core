@@ -7,6 +7,10 @@ using System.Runtime.Serialization.Formatters.Binary;
 using NHibernate.Engine;
 using NHibernate.SqlTypes;
 
+#if NET6_0_OR_GREATER
+#pragma warning disable CS0618 //Serialization is obsolete
+#endif
+
 namespace NHibernate.Type
 {
 	/// <summary>
@@ -50,11 +54,6 @@ namespace NHibernate.Type
 		public override void Set(DbCommand st, object value, int index, ISessionImplementor session)
 		{
 			binaryType.Set(st, ToBytes(value), index, session);
-		}
-
-		public override object Get(DbDataReader rs, string name, ISessionImplementor session)
-		{
-			return Get(rs, rs.GetOrdinal(name), session);
 		}
 
 		public override object Get(DbDataReader rs, int index, ISessionImplementor session)

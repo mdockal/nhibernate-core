@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using NHibernate.Engine;
 using NHibernate.Type;
@@ -39,7 +40,7 @@ namespace NHibernate.Mapping
 		/// <summary>
 		/// Gets a <see cref="bool"/> indicating if this Value is unique.
 		/// </summary>
-		bool IsAlternateUniqueKey { get;}
+		bool IsAlternateUniqueKey { get; }
 
 		/// <summary>
 		/// Gets a <see cref="bool"/> indicating if this Value can have
@@ -78,6 +79,8 @@ namespace NHibernate.Mapping
 
 		FetchMode FetchMode { get; }
 
+		// Since v5.6
+		[Obsolete("This method is not used and will be removed in a future version")]
 		void SetTypeUsingReflection(string className, string propertyName, string accesorName);
 
 		object Accept(IValueVisitor visitor);

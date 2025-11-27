@@ -21,73 +21,47 @@ namespace NHibernate.SqlTypes
 	/// </p>
 	/// </remarks>
 	[Serializable]
-	public class SqlType
+	public class SqlType : IEquatable<SqlType>
 	{
-		private readonly DbType dbType;
-		private readonly int length;
-		private readonly byte precision;
-		private readonly byte scale;
-		private readonly bool lengthDefined;
-		private readonly bool precisionDefined;
+		private readonly int? _length;
+		private readonly byte? _precision;
+		private readonly byte? _scale;
 
 		public SqlType(DbType dbType)
 		{
-			this.dbType = dbType;
+			DbType = dbType;
 		}
 
 		public SqlType(DbType dbType, int length)
 		{
-			this.dbType = dbType;
-			this.length = length;
-			lengthDefined = true;
+			DbType = dbType;
+			_length = length;
 		}
 
 		public SqlType(DbType dbType, byte precision, byte scale)
 		{
-			this.dbType = dbType;
-			this.precision = precision;
-			this.scale = scale;
-			precisionDefined = true;
+			DbType = dbType;
+			_precision = precision;
+			_scale = scale;
 		}
 
 		public SqlType(DbType dbType, byte scale)
 		{
-			this.dbType = dbType;
-			this.scale = scale;
-			ScaleDefined = true;
+			DbType = dbType;
+			_scale = scale;
 		}
 
-		public DbType DbType
-		{
-			get { return dbType; }
-		}
+		public DbType DbType { get; }
 
-		public int Length
-		{
-			get { return length; }
-		}
+		public int Length => _length.GetValueOrDefault();
+		public byte Precision => _precision.GetValueOrDefault();
+		public byte Scale => _scale.GetValueOrDefault();
+		public bool LengthDefined => _length.HasValue;
 
-		public byte Precision
-		{
-			get { return precision; }
-		}
+		public bool PrecisionDefined => _precision.HasValue;
 
-		public byte Scale
-		{
-			get { return scale; }
-		}
 
-		public bool LengthDefined
-		{
-			get { return lengthDefined; }
-		}
-
-		public bool PrecisionDefined
-		{
-			get { return precisionDefined; }
-		}
-
-		public bool ScaleDefined { get; }
+		public bool ScaleDefined => _scale.HasValue;
 
 		#region System.Object Members
 
@@ -125,24 +99,34 @@ namespace NHibernate.SqlTypes
 
 		public bool Equals(SqlType rhsSqlType)
 		{
-			if (rhsSqlType == null)
-			{
-				return false;
-			}
+			if (ReferenceEquals(this, rhsSqlType))
+				return true;
 
-			if (LengthDefined)
-			{
-				return (DbType.Equals(rhsSqlType.DbType)) && (Length == rhsSqlType.Length);
-			}
-			if (PrecisionDefined)
-			{
-				return (DbType.Equals(rhsSqlType.DbType)) && (Precision == rhsSqlType.Precision) && (Scale == rhsSqlType.Scale);
-			}
-			if (ScaleDefined)
-			{
-				return DbType.Equals(rhsSqlType.DbType) && Scale == rhsSqlType.Scale;
-			}
-			return (DbType.Equals(rhsSqlType.DbType));
+			if (rhsSqlType == null)
+				return false;
+
+			if (DbType != rhsSqlType.DbType)
+				return false;
+
+			if (LengthDefined != rhsSqlType.LengthDefined)
+				return false;
+
+			if (PrecisionDefined != rhsSqlType.PrecisionDefined)
+				return false;
+
+			if (ScaleDefined != rhsSqlType.ScaleDefined)
+				return false;
+
+			if (Length != rhsSqlType.Length)
+				return false;
+
+			if (Precision != rhsSqlType.Precision)
+				return false;
+
+			if (Scale != rhsSqlType.Scale)
+				return false;
+
+			return true;
 		}
 
 		public override string ToString()

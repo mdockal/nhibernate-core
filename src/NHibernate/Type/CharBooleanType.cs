@@ -3,7 +3,6 @@ using System.Data;
 using System.Data.Common;
 using NHibernate.Engine;
 using NHibernate.SqlTypes;
-using NHibernate.Util;
 
 namespace NHibernate.Type
 {
@@ -37,13 +36,8 @@ namespace NHibernate.Type
 			}
 			else
 			{
-				return code.Equals(TrueString, StringComparison.InvariantCultureIgnoreCase);
+				return GetBooleanAsObject(code.Equals(TrueString, StringComparison.InvariantCultureIgnoreCase));
 			}
-		}
-
-		public override object Get(DbDataReader rs, string name, ISessionImplementor session)
-		{
-			return Get(rs, rs.GetOrdinal(name), session);
 		}
 
 		public override void Set(DbCommand cmd, Object value, int index, ISessionImplementor session)
@@ -57,9 +51,7 @@ namespace NHibernate.Type
 		}
 
 		public override string ObjectToSQLString(object value, Dialect.Dialect dialect)
-		{
-			return "'" + ToCharacter(value) + "'";
-		}
+			=> dialect.ToStringLiteral(ToCharacter(value), SqlType);
 
 		// 6.0 TODO: rename "xml" parameter as "value": it is not a xml string. The fact it generally comes from a xml
 		// attribute value is irrelevant to the method behavior.
@@ -68,11 +60,11 @@ namespace NHibernate.Type
 		{
 			if (string.Equals(TrueString, xml, StringComparison.InvariantCultureIgnoreCase))
 			{
-				return true;
+				return TrueObject;
 			}
 			else if (string.Equals(FalseString, xml, StringComparison.InvariantCultureIgnoreCase))
 			{
-				return false;
+				return FalseObject;
 			}
 			else
 			{

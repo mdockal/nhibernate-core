@@ -7,15 +7,15 @@ namespace NHibernate.Bytecode
 	[Serializable]
 	public class UnableToLoadProxyFactoryFactoryException : HibernateByteCodeException
 	{
-
 		public UnableToLoadProxyFactoryFactoryException(string typeName, Exception inner)
 			: base("", inner)
 		{
 			TypeName = typeName;
 		}
 
-		protected UnableToLoadProxyFactoryFactoryException(SerializationInfo info, StreamingContext context)
-			: base(info, context)
+		// Since v5.6
+		[Obsolete("This API supports obsolete formatter-based serialization and will be removed in a future version")]
+		protected UnableToLoadProxyFactoryFactoryException(SerializationInfo info, StreamingContext context) : base(info, context)
 		{
 			foreach (var entry in info)
 			{
@@ -26,12 +26,16 @@ namespace NHibernate.Bytecode
 			}
 		}
 
+#pragma warning disable CS0809
+		// Since v5.6
+		[Obsolete("This API supports obsolete formatter-based serialization and will be removed in a future version")]
 		[SecurityCritical]
 		public override void GetObjectData(SerializationInfo info, StreamingContext context)
 		{
 			base.GetObjectData(info, context);
 			info.AddValue("TypeName", TypeName);
 		}
+#pragma warning restore CS0809
 
 		public string TypeName { get; }
 		public override string Message

@@ -47,7 +47,7 @@ namespace NHibernate.Cfg
 	/// </para>
 	/// </remarks>
 	[Serializable]
-	public class Configuration : ISerializable
+	public partial class Configuration : ISerializable
 	{
 		/// <summary>Default name for hibernate configuration file.</summary>
 		public const string DefaultHibernateCfgFileName = "hibernate.cfg.xml";
@@ -98,7 +98,6 @@ namespace NHibernate.Cfg
 			FilterDefinitions = GetSerialedObject<IDictionary<string, FilterDefinition>>(info, "filterDefinitions");
 			Imports = GetSerialedObject<IDictionary<string, string>>(info, "imports");
 			interceptor = GetSerialedObject<IInterceptor>(info, "interceptor");
-			mapping = GetSerialedObject<IMapping>(info, "mapping");
 			NamedQueries = GetSerialedObject<IDictionary<string, NamedQueryDefinition>>(info, "namedQueries");
 			NamedSQLQueries = GetSerialedObject<IDictionary<string, NamedSQLQueryDefinition>>(info, "namedSqlQueries");
 			namingStrategy = GetSerialedObject<INamingStrategy>(info, "namingStrategy");
@@ -124,7 +123,6 @@ namespace NHibernate.Cfg
 		{
 			ConfigureProxyFactoryFactory();
 			SecondPassCompile();
-			Validate();
 
 			info.AddValue("entityNotFoundDelegate", EntityNotFoundDelegate);
 
@@ -139,7 +137,6 @@ namespace NHibernate.Cfg
 			info.AddValue("filterDefinitions", FilterDefinitions);
 			info.AddValue("imports", Imports);
 			info.AddValue("interceptor", interceptor);
-			info.AddValue("mapping", mapping);
 			info.AddValue("namedQueries", NamedQueries);
 			info.AddValue("namedSqlQueries", NamedSQLQueries);
 			info.AddValue("namingStrategy", namingStrategy);
@@ -171,7 +168,9 @@ namespace NHibernate.Cfg
 			propertyReferences = new List<Mappings.PropertyReference>();
 			FilterDefinitions = new Dictionary<string, FilterDefinition>();
 			interceptor = EmptyInterceptor.Instance;
+#pragma warning disable 618
 			properties = Environment.Properties;
+#pragma warning restore 618
 			auxiliaryDatabaseObjects = new List<IAuxiliaryDatabaseObject>();
 			SqlFunctions = new Dictionary<string, ISQLFunction>();
 			mappingsQueue = new MappingsQueue();
@@ -239,23 +238,59 @@ namespace NHibernate.Cfg
 				NHibernate.Dialect.Dialect.GetDialect(configuration.Properties);
 		}
 
-		private IMapping mapping;
+		[Serializable]
+		private class StaticDialectMappingWrapper : IMapping
+		{
+			private readonly IMapping _mapping;
+
+			public StaticDialectMappingWrapper(IMapping mapping, Dialect.Dialect dialect)
+			{
+				_mapping = mapping;
+				Dialect = dialect;
+			}
+
+			public IType GetIdentifierType(string className)
+			{
+				return _mapping.GetIdentifierType(className);
+			}
+
+			public string GetIdentifierPropertyName(string className)
+			{
+				return _mapping.GetIdentifierPropertyName(className);
+			}
+
+			public IType GetReferencedPropertyType(string className, string propertyName)
+			{
+				return _mapping.GetReferencedPropertyType(className, propertyName);
+			}
+
+			public bool HasNonIdentifierPropertyNamedId(string className)
+			{
+				return _mapping.HasNonIdentifierPropertyNamedId(className);
+			}
+
+			public Dialect.Dialect Dialect { get; }
+		}
 
 		protected Configuration(SettingsFactory settingsFactory)
 		{
-			InitBlock();
 			this.settingsFactory = settingsFactory;
 			Reset();
 		}
 
-		private void InitBlock()
-		{
-			mapping = BuildMapping();
-		}
-
+		// Since v5.5
+		[Obsolete("Use BuildMapping(Dialect.Dialect) instead.")]
 		public virtual IMapping BuildMapping()
 		{
 			return new Mapping(this);
+		}
+
+		public virtual IMapping BuildMapping(Dialect.Dialect dialect)
+		{
+#pragma warning disable CS0618
+			var mapping = BuildMapping();
+#pragma warning restore CS0618
+			return new StaticDialectMappingWrapper(mapping, dialect);
 		}
 
 		/// <summary>
@@ -512,9 +547,8 @@ namespace NHibernate.Cfg
 		public void AddDeserializedMapping(HbmMapping mappingDocument, string documentFileName)
 		{
 			if (mappingDocument == null)
-			{
-				throw new ArgumentNullException("mappingDocument");
-			}
+				throw new ArgumentNullException(nameof(mappingDocument));
+
 			try
 			{
 				var dialect = new Lazy<Dialect.Dialect>(() => Dialect.Dialect.GetDialect(properties));
@@ -709,9 +743,8 @@ namespace NHibernate.Cfg
 		public Configuration AddResources(IEnumerable<string> paths, Assembly assembly)
 		{
 			if (paths == null)
-			{
-				throw new ArgumentNullException("paths");
-			}
+				throw new ArgumentNullException(nameof(paths));
+			
 			foreach (var path in paths)
 			{
 				AddResource(path, assembly);
@@ -782,7 +815,7 @@ namespace NHibernate.Cfg
 			return this;
 		}
 
-		private static IList<string> GetAllHbmXmlResourceNames(Assembly assembly)
+		private static List<string> GetAllHbmXmlResourceNames(Assembly assembly)
 		{
 			var result = new List<string>();
 
@@ -851,7 +884,7 @@ namespace NHibernate.Cfg
 					{
 						foreach (var fk in table.ForeignKeyIterator)
 						{
-							if (fk.HasPhysicalConstraint && IncludeAction(fk.ReferencedTable.SchemaActions, SchemaAction.Drop))
+							if (fk.IsGenerated(dialect) && IncludeAction(fk.ReferencedTable.SchemaActions, SchemaAction.Drop))
 							{
 								script.Add(fk.SqlDropString(dialect, defaultCatalog, defaultSchema));
 							}
@@ -898,6 +931,7 @@ namespace NHibernate.Cfg
 		/// <param name="dialect"></param>
 		public string[] GenerateSchemaCreationScript(Dialect.Dialect dialect)
 		{
+			var mapping = BuildMapping(dialect);
 			SecondPassCompile();
 
 			var defaultCatalog = GetQuotedDefaultCatalog(dialect);
@@ -939,7 +973,7 @@ namespace NHibernate.Cfg
 					{
 						foreach (var fk in table.ForeignKeyIterator)
 						{
-							if (fk.HasPhysicalConstraint && IncludeAction(fk.ReferencedTable.SchemaActions, SchemaAction.Export))
+							if (fk.IsGenerated(dialect) && IncludeAction(fk.ReferencedTable.SchemaActions, SchemaAction.Export))
 							{
 								script.Add(fk.SqlCreateString(dialect, mapping, defaultCatalog, defaultSchema));
 							}
@@ -965,11 +999,11 @@ namespace NHibernate.Cfg
 			return script.ToArray();
 		}
 
-		private void Validate()
+		private void Validate(IMapping mapping)
 		{
-			ValidateEntities();
+			ValidateEntities(mapping);
 
-			ValidateCollections();
+			ValidateCollections(mapping);
 
 			ValidateFilterDefs();
 		}
@@ -1023,7 +1057,7 @@ namespace NHibernate.Cfg
 			}
 		}
 
-		private void ValidateCollections()
+		private void ValidateCollections(IMapping mapping)
 		{
 			foreach (var col in collections.Values)
 			{
@@ -1031,7 +1065,7 @@ namespace NHibernate.Cfg
 			}
 		}
 
-		private void ValidateEntities()
+		private void ValidateEntities(IMapping mapping)
 		{
 			bool validateProxy = PropertiesHelper.GetBoolean(Environment.UseProxyValidator, properties, true);
 			HashSet<string> allProxyErrors = null;
@@ -1245,8 +1279,7 @@ namespace NHibernate.Cfg
 			//http://nhibernate.jira.com/browse/NH-975
 
 			var ipff = Environment.BytecodeProvider as IInjectableProxyFactoryFactory;
-			string pffClassName;
-			properties.TryGetValue(Environment.ProxyFactoryFactoryClass, out pffClassName);
+			properties.TryGetValue(Environment.ProxyFactoryFactoryClass, out var pffClassName);
 			if (ipff != null && !string.IsNullOrEmpty(pffClassName))
 			{
 				ipff.SetProxyFactoryFactory(pffClassName);
@@ -1254,6 +1287,7 @@ namespace NHibernate.Cfg
 
 			#endregion
 		}
+
 		/// <summary>
 		/// Instantiate a new <see cref="ISessionFactory" />, using the properties and mappings in this
 		/// configuration. The <see cref="ISessionFactory" /> will be immutable, so changes made to the
@@ -1262,12 +1296,16 @@ namespace NHibernate.Cfg
 		/// <returns>An <see cref="ISessionFactory" /> instance.</returns>
 		public ISessionFactory BuildSessionFactory()
 		{
-
+			// Use a mapping which does store the dialect instead of instantiating a new one
+			// at each access. The dialect does not change while building a session factory.
+			// It furthermore allows some hack on NHibernate.Spatial side to go on working,
+			// See nhibernate/NHibernate.Spatial#104
+			var settings = BuildSettings();
+			var mapping = BuildMapping(settings.Dialect);
 			ConfigureProxyFactoryFactory();
 			SecondPassCompile();
-			Validate();
+			Validate(mapping);
 			Environment.VerifyProperties(properties);
-			Settings settings = BuildSettings();
 
 			// Ok, don't need schemas anymore, so free them
 			Schemas = null;
@@ -2176,7 +2214,6 @@ namespace NHibernate.Cfg
 			}
 		}
 
-
 		/// <summary>
 		/// Append the listeners to the end of the currently configured
 		/// listeners
@@ -2306,6 +2343,7 @@ namespace NHibernate.Cfg
 		/// <seealso cref="NHibernate.Tool.hbm2ddl.SchemaUpdate"/>
 		public string[] GenerateSchemaUpdateScript(Dialect.Dialect dialect, IDatabaseMetadata databaseMetadata)
 		{
+			var mapping = BuildMapping(dialect);
 			SecondPassCompile();
 
 			var defaultCatalog = GetQuotedDefaultCatalog(dialect);
@@ -2344,7 +2382,7 @@ namespace NHibernate.Cfg
 					{
 						foreach (var fk in table.ForeignKeyIterator)
 						{
-							if (fk.HasPhysicalConstraint && IncludeAction(fk.ReferencedTable.SchemaActions, SchemaAction.Update))
+							if (fk.IsGenerated(dialect) && IncludeAction(fk.ReferencedTable.SchemaActions, SchemaAction.Update))
 							{
 								bool create = tableInfo == null
 											  ||
@@ -2386,6 +2424,7 @@ namespace NHibernate.Cfg
 
 		public void ValidateSchema(Dialect.Dialect dialect, IDatabaseMetadata databaseMetadata)
 		{
+			var mapping = BuildMapping(dialect);
 			SecondPassCompile();
 
 			var defaultCatalog = GetQuotedDefaultCatalog(dialect);

@@ -46,7 +46,6 @@ namespace NHibernate.Test.NHSpecificTest.Logs
 
 		protected override void Configure(Configuration configuration)
 		{
-			base.Configure(configuration);
 			configuration.SetProperty(Cfg.Environment.UseSecondLevelCache, "false");
 		}
 
@@ -159,12 +158,15 @@ namespace NHibernate.Test.NHSpecificTest.Logs
 			var semaphore = new SemaphoreSlim(0);
 			var failures = new ConcurrentBag<Exception>();
 			var sessionIds = new ConcurrentDictionary<int, Guid>();
+			var threadCount = 10;
+			if (threadCount > TestDialect.MaxNumberOfConnections)
+				threadCount = TestDialect.MaxNumberOfConnections.Value;
 			using (var spy = new TextLogSpy("NHibernate.SQL", "%message | SessionId: %property{sessionId}"))
 			{
 				await (Task.WhenAll(
-					Enumerable.Range(1, 12 - 1).Select(async i =>
+					Enumerable.Range(1, threadCount + 2 - 1).Select(async i =>
 					{
-						if (i > 10)
+						if (i > threadCount)
 						{
 							// Give some time to threads for reaching the wait, having all of them ready to do most of their job concurrently.
 							await (Task.Delay(100));
@@ -198,7 +200,7 @@ namespace NHibernate.Test.NHSpecificTest.Logs
 				Assert.That(failures, Is.Empty, $"{failures.Count} task(s) failed.");
 
 				var loggingEvent = spy.GetWholeLog();
-				for (var i = 1; i < 11; i++)
+				for (var i = 1; i < threadCount + 1; i++)
 				for (var j = 0; j < 10; j++)
 				{
 					var sessionId = sessionIds[i];

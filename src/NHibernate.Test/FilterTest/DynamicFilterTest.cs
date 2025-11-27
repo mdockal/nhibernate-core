@@ -16,6 +16,8 @@ namespace NHibernate.Test.FilterTest
 		private static readonly ILog log = LogManager.GetLogger(typeof(DynamicFilterTest));
 		private TestData testData;
 
+		protected override string CacheConcurrencyStrategy => "nonstrict-read-write";
+
 		protected override void OnSetUp()
 		{
 			testData = new TestData(this);
@@ -33,7 +35,7 @@ namespace NHibernate.Test.FilterTest
 			var persister = Sfi
 				.GetCollectionPersister(typeof(Salesperson).FullName + ".Orders");
 			var cacheKey =
-				new CacheKey(testData.steveId, persister.KeyType, persister.Role, Sfi);
+				new CacheKey(testData.steveId, persister.KeyType, persister.Role, Sfi, null);
 			CollectionCacheEntry cachedData;
 
 			using (var session = OpenSession())
@@ -94,7 +96,7 @@ namespace NHibernate.Test.FilterTest
 				salespersons = session.CreateQuery("select s from Salesperson as s left join fetch s.Orders").List();
 				Assert.AreEqual(1, salespersons.Count, "Incorrect salesperson count");
 				sp = (Salesperson) salespersons[0];
-				Assert.AreEqual(sp.Orders.Count, 1, "Incorrect order count");
+				Assert.AreEqual(1, sp.Orders.Count, "Incorrect order count");
 			}
 		}
 
@@ -186,7 +188,6 @@ namespace NHibernate.Test.FilterTest
 				Assert.AreEqual(1, products.Count, "Incorrect product count");
 			}
 		}
-
 
 		[Test]
 		public void CriteriaControl()
@@ -282,7 +283,6 @@ namespace NHibernate.Test.FilterTest
 
 				Assert.That(orders.Count, Is.EqualTo(1), "Incorrect orders count");
 
-
 				log.Info("query against Order with a subquery for line items with a subquery line items where the product name is Acme Hair Gel and the quantity is greater than 1 in a given region and the product is effective as of 4 months ago");
 				session.EnableFilter("region").SetParameter("region", "APAC");
 				session.EnableFilter("effectiveDate").SetParameter("asOfDate", testData.fourMonthsAgo.Date);
@@ -297,7 +297,6 @@ namespace NHibernate.Test.FilterTest
 				session.Close();
 			}
 		}
-
 
 		[Test]
 		public void GetFilters()
@@ -710,7 +709,6 @@ namespace NHibernate.Test.FilterTest
 				using (var session = outer.OpenSession())
 				using (var transaction = session.BeginTransaction())
 				{
-
 					foreach (var obj in entitiesToCleanUp)
 					{
 						session.Delete(obj);

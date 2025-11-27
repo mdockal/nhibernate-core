@@ -63,9 +63,9 @@ namespace NHibernate.Test.ExpressionTest.Projection
 		                			.Add(Projections.Min("Pay")));
 				c.SetResultTransformer(trans);
 				ProjectionReport report = c.UniqueResult<ProjectionReport>();
-				Assert.AreEqual(report.AvgPay, 2.5);
-				Assert.AreEqual(report.MaxPay, 4);
-				Assert.AreEqual(report.MinPay, 1);
+				Assert.AreEqual(2.5, report.AvgPay);
+				Assert.AreEqual(4, report.MaxPay);
+				Assert.AreEqual(1, report.MinPay);
 			}
 		}
 
@@ -81,15 +81,15 @@ namespace NHibernate.Test.ExpressionTest.Projection
                     .Add(Projections.Max("Pay"))
                     .Add(Projections.Min("Pay")))
                     ;
-                IList result = c.List();// c.UniqueResult();
+				IList result = c.List(); // c.UniqueResult();
                 Assert.IsTrue(result.Count == 1, "More than one record was found, while just one was expected");
                 Assert.IsTrue(result[0] is object[], 
                     "expected object[] as result, but found " + result[0].GetType().Name);
                 object[] results = (object[])result[0];
-                Assert.AreEqual(results.Length, 3);
-                Assert.AreEqual(results[0], 2.5);
-                Assert.AreEqual(results[1], 4);
-                Assert.AreEqual(results[2], 1);
+                Assert.AreEqual(3, results.Length);
+                Assert.AreEqual(2.5, results[0]);
+                Assert.AreEqual(4, results[1]);
+                Assert.AreEqual(1, results[2]);
             }
         }
 
@@ -105,10 +105,10 @@ namespace NHibernate.Test.ExpressionTest.Projection
                     new string[] { "MyPay" },
                     new IType[] { NHibernateUtil.Double })));
 
-                IList result = c.List();// c.UniqueResult();
+                IList result = c.List(); // c.UniqueResult();
                 Assert.IsTrue(result.Count == 1);
                 object results = result[0];
-                Assert.AreEqual(results, 2.5);
+                Assert.AreEqual(2.5, results);
             }
         }
     }

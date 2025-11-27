@@ -32,11 +32,9 @@ namespace NHibernate.Test.Linq
 
 		protected override void Configure(Configuration configuration)
 		{
-			base.Configure(configuration);
 			configuration.SetProperty(Environment.BatchStrategy,
 									  typeof(TimeoutCatchingNonBatchingBatcherFactory).AssemblyQualifiedName);
 		}
-
 
 		[Test]
 		public async Task CanSetTimeoutOnLinqQueriesAsync()
@@ -49,7 +47,6 @@ namespace NHibernate.Test.Linq
 
 			Assert.That(TimeoutCatchingNonBatchingBatcher.LastCommandTimeout, Is.EqualTo(17));
 		}
-
 
 		[Test]
 		public async Task CanSetTimeoutOnLinqPagingQueryAsync()
@@ -64,7 +61,6 @@ namespace NHibernate.Test.Linq
 			Assert.That(TimeoutCatchingNonBatchingBatcher.LastCommandTimeout, Is.EqualTo(17));
 		}
 
-
 		[Test]
 		public async Task CanSetTimeoutBeforeSkipOnLinqOrderedPageQueryAsync()
 		{
@@ -77,7 +73,6 @@ namespace NHibernate.Test.Linq
 
 			Assert.That(TimeoutCatchingNonBatchingBatcher.LastCommandTimeout, Is.EqualTo(17));
 		}
-
 
 		[Test]
 		public async Task CanSetTimeoutOnLinqGroupPageQueryAsync()
@@ -98,12 +93,10 @@ namespace NHibernate.Test.Linq
 			Assert.That(TimeoutCatchingNonBatchingBatcher.LastCommandTimeout, Is.EqualTo(17));
 		}
 
-
 		public partial class TimeoutCatchingNonBatchingBatcher : NonBatchingBatcher
 		{
 			// Is there an easier way to inspect the DbCommand instead of
 			// creating a custom batcher?
-
 
 			public static int LastCommandTimeout;
 
@@ -114,15 +107,8 @@ namespace NHibernate.Test.Linq
 
 			public override Task<DbDataReader> ExecuteReaderAsync(DbCommand cmd, CancellationToken cancellationToken)
 			{
-				try
-				{
-					LastCommandTimeout = cmd.CommandTimeout;
-					return base.ExecuteReaderAsync(cmd, cancellationToken);
-				}
-				catch (System.Exception ex)
-				{
-					return Task.FromException<DbDataReader>(ex);
-				}
+				LastCommandTimeout = cmd.CommandTimeout;
+				return base.ExecuteReaderAsync(cmd, cancellationToken);
 			}
 
 			public override DbDataReader ExecuteReader(DbCommand cmd)
@@ -131,7 +117,6 @@ namespace NHibernate.Test.Linq
 				return base.ExecuteReader(cmd);
 			}
 		}
-
 
 		public partial class TimeoutCatchingNonBatchingBatcherFactory : IBatcherFactory
 		{
@@ -144,21 +129,13 @@ namespace NHibernate.Test.Linq
 	public partial class QueryTimeoutTests : LinqTestCase
 	{
 
-
 		public partial class TimeoutCatchingNonBatchingBatcher : NonBatchingBatcher
 		{
 
 			public override Task<DbDataReader> ExecuteReaderAsync(DbCommand cmd, CancellationToken cancellationToken)
 			{
-				try
-				{
-					LastCommandTimeout = cmd.CommandTimeout;
-					return base.ExecuteReaderAsync(cmd, cancellationToken);
-				}
-				catch (System.Exception ex)
-				{
-					return Task.FromException<DbDataReader>(ex);
-				}
+				LastCommandTimeout = cmd.CommandTimeout;
+				return base.ExecuteReaderAsync(cmd, cancellationToken);
 			}
 		}
 	}

@@ -110,7 +110,6 @@ namespace NHibernate.Test.MappingByCode.ExpliticMappingTests
 
 		private class Inherited:MyClass
 		{
-			
 		}
 
 		[Test]
@@ -190,6 +189,20 @@ namespace NHibernate.Test.MappingByCode.ExpliticMappingTests
 		}
 
 		[Test]
+		public void BackfieldAccessPropertyMapping()
+		{
+			var mapper = new ModelMapper();
+			mapper.Class<MyClass>(mc =>
+								  {
+									mc.Id(x => x.Id, m => m.Access(Accessor.Backfield));
+								  });
+
+			HbmMapping mappings = mapper.CompileMappingForAllExplicitlyAddedEntities();
+			HbmClass hbmClass = mappings.RootClasses[0];
+			Assert.That(hbmClass.Id.access, Is.EqualTo("backfield"));
+		}
+
+		[Test]
 		public void WhenMapBagWithWrongElementTypeThenThrows()
 		{
 			var mapper = new ModelMapper();
@@ -265,7 +278,6 @@ namespace NHibernate.Test.MappingByCode.ExpliticMappingTests
 				mc.Component<object>("Compo", y => y.Access(Accessor.Field));
 			}), Throws.TypeOf<MappingException>());
 		}
-
 
 		[Test]
 		public void WhenMapOneToOneWithWrongTypeThenThrows()

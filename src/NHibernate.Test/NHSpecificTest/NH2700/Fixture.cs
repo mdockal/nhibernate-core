@@ -22,7 +22,7 @@ namespace NHibernate.Test.NHSpecificTest.NH2700
         {
             _originalDialect = Dialect;
 
-            cfg.SetProperty(Environment.Dialect, typeof(CustomDialect).AssemblyQualifiedName);
+            configuration.SetProperty(Environment.Dialect, typeof(CustomDialect).AssemblyQualifiedName);
         }
 
         public static string GetSql(ICriteria criteria)
@@ -54,7 +54,6 @@ namespace NHibernate.Test.NHSpecificTest.NH2700
 		[Test]
 		public void TestProjection()
 		{
-            
             using (var s = OpenSession())
             {
                 var proj = new SqlFunctionProjection("AddDays", NHibernateUtil.DateTime,

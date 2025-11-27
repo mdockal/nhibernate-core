@@ -1,4 +1,5 @@
 using System.Data;
+using NHibernate.Dialect.Function;
 using NHibernate.SqlCommand;
 
 namespace NHibernate.Dialect
@@ -13,7 +14,16 @@ namespace NHibernate.Dialect
 			RegisterColumnType(DbType.Guid, "BINARY(16)");
 		}
 
-		protected override void RegisterCastTypes() {
+		protected override void RegisterFunctions()
+		{
+			base.RegisterFunctions();
+			
+			RegisterFunction("strguid", new SQLFunctionTemplate(NHibernateUtil.String, "concat(hex(reverse(substr(?1, 1, 4))), '-', hex(reverse(substring(?1, 5, 2))), '-', hex(reverse(substr(?1, 7, 2))), '-', hex(substr(?1, 9, 2)), '-', hex(substr(?1, 11)))"));
+			RegisterFunction("new_uuid", new NoArgSQLFunction("uuid", NHibernateUtil.Guid));
+		}
+
+		protected override void RegisterCastTypes() 
+		{
 			base.RegisterCastTypes();
 			// MySql 5 also supports DECIMAL as a cast type target
 			// http://dev.mysql.com/doc/refman/5.0/en/cast-functions.html

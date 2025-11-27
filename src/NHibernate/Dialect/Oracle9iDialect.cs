@@ -1,4 +1,5 @@
 using System.Data;
+using NHibernate.Dialect.Function;
 using NHibernate.SqlCommand;
 using NHibernate.SqlTypes;
 
@@ -6,19 +7,10 @@ namespace NHibernate.Dialect
 {
 	public class Oracle9iDialect : Oracle8iDialect
 	{
-		public override string CurrentTimestampSelectString
-		{
-			get { return "select systimestamp from dual"; }
-		}
+		public override string CurrentTimestampSelectString =>
+			$"select {CurrentTimestampSQLFunctionName} from dual";
 
-		public override string CurrentTimestampSQLFunctionName
-		{
-			get
-			{
-				// the standard SQL function name is current_timestamp...
-				return "current_timestamp";
-			}
-		}
+		public override string CurrentTimestampSQLFunctionName => "localtimestamp";
 
 		// Current_timestamp is a timestamp with time zone, so it can always be converted back to UTC.
 		/// <inheritdoc />
@@ -41,6 +33,18 @@ namespace NHibernate.Dialect
 			RegisterColumnType(DbType.Xml, "XMLTYPE");
 		}
 
+		protected override void RegisterFunctions()
+		{
+			base.RegisterFunctions();
+
+			RegisterFunction(
+				"current_timestamp",
+				new NoArgSQLFunction("localtimestamp", NHibernateUtil.LocalDateTime, false));
+			RegisterFunction(
+				"current_utctimestamp",
+				new SQLFunctionTemplate(NHibernateUtil.UtcDateTime, "SYS_EXTRACT_UTC(current_timestamp)"));
+		}
+
 		public override long TimestampResolutionInTicks => 1;
 
 		public override string GetSelectClauseNullString(SqlType sqlType)
@@ -56,5 +60,8 @@ namespace NHibernate.Dialect
 
 		/// <inheritdoc />
 		public override bool SupportsDateTimeScale => true;
+
+		/// <inheritdoc />
+		public override bool SupportsRowValueConstructorSyntaxInInList => true;
 	}
 }

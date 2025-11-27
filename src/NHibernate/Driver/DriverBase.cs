@@ -47,6 +47,31 @@ namespace NHibernate.Driver
 		public abstract DbCommand CreateCommand();
 
 		/// <summary>
+		/// Unwraps the <see cref="DbCommand"/> in case it is wrapped, otherwise the same instance is returned.
+		/// </summary>
+		/// <param name="command">The command to unwrap.</param>
+		/// <returns>The unwrapped command.</returns>
+		public virtual DbCommand UnwrapDbCommand(DbCommand command)
+		{
+			return command;
+		}
+
+		/// <summary>
+		/// Begin an ADO <see cref="DbTransaction" />.
+		/// </summary>
+		/// <param name="isolationLevel">The isolation level requested for the transaction.</param>
+		/// <param name="connection">The connection on which to start the transaction.</param>
+		/// <returns>The started <see cref="DbTransaction" />.</returns>
+		public virtual DbTransaction BeginTransaction(IsolationLevel isolationLevel, DbConnection connection)
+		{
+			if (isolationLevel == IsolationLevel.Unspecified)
+			{
+				return connection.BeginTransaction();
+			}
+			return connection.BeginTransaction(isolationLevel);
+		}
+
+		/// <summary>
 		/// Does this Driver require the use of a Named Prefix in the SQL statement.  
 		/// </summary>
 		/// <remarks>
@@ -234,7 +259,7 @@ namespace NHibernate.Driver
 		public virtual void ExpandQueryParameters(DbCommand cmd, SqlString sqlString, SqlType[] parameterTypes)
 		{
 			if (UseNamedPrefixInSql)
-				return;  // named parameters are ok
+				return; // named parameters are ok
 
 			var expandedParameters = new List<DbParameter>();
 			foreach (object part in sqlString)
@@ -304,6 +329,55 @@ namespace NHibernate.Driver
 		{
 		}
 
+#if NET6_0_OR_GREATER
+		public void PrepareBatch(DbBatch batch)
+		{
+			OnBeforePrepare(batch);
+
+			if (SupportsPreparingCommands && prepareSql)
+			{
+				batch.Prepare();
+			}
+		}
+
+		/// <summary>
+		/// Override to make any adjustments to the DbBatch object.  (e.g., Oracle custom OUT parameter)
+		/// Parameters have been bound by this point, so their order can be adjusted too.
+		/// This is analogous to the RegisterResultSetOutParameter() function in Hibernate.
+		/// </summary>
+		protected virtual void OnBeforePrepare(DbBatch batch)
+		{
+		}
+
+		public virtual DbBatch CreateBatch()
+		{
+			throw new NotSupportedException();
+		}
+
+		public virtual bool CanCreateBatch => false;
+
+		/// <summary>
+		/// Override to use a custom mechanism to create a <see cref="DbBatchCommand"/> from a <see cref="DbCommand"/>.
+		/// The default implementation relies on the parameters implementing (and properly supporting) <see cref="System.ICloneable"/>
+		/// </summary>
+		/// <param name="dbBatch"></param>
+		/// <param name="dbCommand"></param>
+		/// <returns></returns>
+		public virtual DbBatchCommand CreateDbBatchCommandFromDbCommand(DbBatch dbBatch, DbCommand dbCommand)
+		{
+			var dbBatchCommand = dbBatch.CreateBatchCommand();
+			dbBatchCommand.CommandText = dbCommand.CommandText;
+			dbBatchCommand.CommandType = dbCommand.CommandType;
+			
+			foreach (var param in dbCommand.Parameters)
+			{
+				dbBatchCommand.Parameters.Add(((ICloneable) param).Clone());
+			}
+			return dbBatchCommand;
+		}
+
+#endif
+
 		public DbParameter GenerateOutputParameter(DbCommand command)
 		{
 			var param = GenerateParameter(command, "ReturnValue", SqlTypeFactory.Int32);
@@ -313,14 +387,14 @@ namespace NHibernate.Driver
 
 		public virtual bool RequiresTimeSpanForTime => false;
 
-#if NETCOREAPP2_0
-		public virtual bool SupportsSystemTransactions => false;
-
-		public virtual bool SupportsNullEnlistment => false;
-#else
+#if NETFX
 		public virtual bool SupportsSystemTransactions => true;
 
 		public virtual bool SupportsNullEnlistment => true;
+#else
+		public virtual bool SupportsSystemTransactions => false;
+
+		public virtual bool SupportsNullEnlistment => false;
 #endif
 
 		/// <inheritdoc />
@@ -330,5 +404,11 @@ namespace NHibernate.Driver
 
 		/// <inheritdoc />
 		public virtual DateTime MinDate => DateTime.MinValue;
+
+		//6.0 TODO: Add property definition to IDialect
+		/// <summary>
+		/// Get the timeout in seconds for ADO.NET queries.
+		/// </summary>
+		public virtual int CommandTimeout => commandTimeout;
 	}
 }

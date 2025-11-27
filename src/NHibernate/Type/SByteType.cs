@@ -3,6 +3,8 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
+using System.Globalization;
+using System.Numerics;
 using NHibernate.Engine;
 using NHibernate.SqlTypes;
 
@@ -15,23 +17,25 @@ namespace NHibernate.Type
 	[Serializable]
 	public class SByteType : PrimitiveType, IDiscriminatorType
 	{
-		/// <summary></summary>
+		private static readonly object ZeroObject = (sbyte) 0;
+
+		/// <summary />
 		public SByteType() : base(SqlTypeFactory.SByte)
 		{
 		}
 
 		/// <summary></summary>
-		public override string Name
-		{
-			get { return "SByte"; }
-		}
+		public override string Name => "SByte";
 
-		private static readonly SByte ZERO = 0;
 		public override object Get(DbDataReader rs, int index, ISessionImplementor session)
 		{
 			try
 			{
-				return Convert.ToSByte(rs[index]);
+				return rs[index] switch
+				{
+					BigInteger bi => (sbyte) bi,
+					var c => Convert.ToSByte(c)
+				};
 			}
 			catch (Exception ex)
 			{
@@ -39,26 +43,11 @@ namespace NHibernate.Type
 			}
 		}
 
-		public override object Get(DbDataReader rs, string name, ISessionImplementor session)
-		{
-			try
-			{
-				return Convert.ToSByte(rs[name]);
-			}
-			catch (Exception ex)
-			{
-				throw new FormatException(string.Format("Input string '{0}' was not in the correct format.", rs[name]), ex);
-			}
-		}
-
-		public override System.Type ReturnedClass
-		{
-			get { return typeof(SByte); }
-		}
+		public override System.Type ReturnedClass => typeof(SByte);
 
 		public override void Set(DbCommand rs, object value, int index, ISessionImplementor session)
 		{
-			rs.Parameters[index].Value = value;
+			rs.Parameters[index].Value = Convert.ToSByte(value);
 		}
 
 		// 6.0 TODO: rename "xml" parameter as "value": it is not a xml string. The fact it generally comes from a xml
@@ -79,8 +68,6 @@ namespace NHibernate.Type
 			return SByte.Parse(xml);
 		}
 
-		#region IVersionType Members
-
 		// Since 5.2
 		[Obsolete("This member has no more usage and will be removed in a future version.")]
 		public virtual object Next(object current, ISessionImplementor session)
@@ -97,26 +84,15 @@ namespace NHibernate.Type
 
 		// Since 5.2
 		[Obsolete("This member has no more usage and will be removed in a future version.")]
-		public IComparer Comparator
-		{
-			get { return Comparer<SByte>.Default; }
-		}
+		public IComparer Comparator => Comparer<SByte>.Default;
 
-		#endregion
+		public override System.Type PrimitiveClass => typeof(SByte);
 
-		public override System.Type PrimitiveClass
-		{
-			get { return typeof(SByte); }
-		}
-
-		public override object DefaultValue
-		{
-			get { return ZERO; }
-		}
+		public override object DefaultValue => ZeroObject;
 
 		public override string ObjectToSQLString(object value, Dialect.Dialect dialect)
 		{
-			return value.ToString();
+			return ((sbyte)value).ToString(CultureInfo.InvariantCulture);
 		}
 	}
 }

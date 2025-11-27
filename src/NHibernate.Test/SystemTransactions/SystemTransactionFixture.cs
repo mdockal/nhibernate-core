@@ -1,12 +1,13 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Transactions;
 using NHibernate.Cfg;
 using NHibernate.Driver;
 using NHibernate.Engine;
-using NHibernate.Linq;
 using NHibernate.Test.TransactionTest;
 using NUnit.Framework;
 
@@ -17,6 +18,13 @@ namespace NHibernate.Test.SystemTransactions
 	{
 		protected override bool UseConnectionOnSystemTransactionPrepare => true;
 		protected override bool AutoJoinTransaction => true;
+
+		protected override void OnTearDown()
+		{
+			base.OnTearDown();
+			// The SupportsTransactionTimeout test may change this, restore it to its default value.
+			FailOnNotClosedSession = true;
+		}
 
 		[Test]
 		public void WillNotCrashOnPrepareFailure()
@@ -181,12 +189,12 @@ namespace NHibernate.Test.SystemTransactions
 			// being concurrently disposed of. See https://github.com/nhibernate/nhibernate-core/pull/1505 for more details.
 			if (Sfi.ConnectionProvider.Driver is OdbcDriver)
 				Assert.Ignore("ODBC sometimes fails on second scope by checking the previous transaction status, which may yield an object disposed exception");
-			// SAP HANA .Net provider always causes system transactions to be distributed, causing them to complete
-			// on concurrent threads. This creates race conditions when chaining scopes, the subsequent scope usage
+			// SAP HANA & SQL Anywhere .Net providers always cause system transactions to be distributed, causing them to
+			// complete on concurrent threads. This creates race conditions when chaining scopes, the subsequent scope usage
 			// finding the connection still enlisted in the previous transaction, its complete being still not finished
 			// on its own thread.
-			if (Sfi.ConnectionProvider.Driver is HanaDriverBase)
-				Assert.Ignore("SAP HANA scope handling causes concurrency issues preventing chaining scope usages.");
+			if (Sfi.ConnectionProvider.Driver is HanaDriverBase || Sfi.ConnectionProvider.Driver is SapSQLAnywhere17Driver)
+				Assert.Ignore("SAP HANA and SQL Anywhere scope handling causes concurrency issues preventing chaining scope usages.");
 
 			using (var s = WithOptions().ConnectionReleaseMode(ConnectionReleaseMode.OnClose).OpenSession())
 			{
@@ -254,6 +262,13 @@ namespace NHibernate.Test.SystemTransactions
 		public void CanUseSessionOutsideOfScopeAfterScope(bool explicitFlush)
 		{
 			IgnoreIfUnsupported(explicitFlush);
+			// SAP SQL Anywhere .Net provider always causes system transactions to be distributed, causing them to
+			// complete on concurrent threads. This creates race conditions when chaining session usage after a scope,
+			// the subsequent usage finding the connection still enlisted in the previous transaction, its complete
+			// being still not finished on its own thread.
+			if (Sfi.ConnectionProvider.Driver is SapSQLAnywhere17Driver)
+				Assert.Ignore("SAP SQL Anywhere scope handling causes concurrency issues preventing chaining session usages.");
+
 			using (var s = WithOptions().ConnectionReleaseMode(ConnectionReleaseMode.OnClose).OpenSession())
 			{
 				using (var tx = new TransactionScope())
@@ -269,10 +284,11 @@ namespace NHibernate.Test.SystemTransactions
 				}
 				var count = 0;
 				Assert.DoesNotThrow(() => count = s.Query<Person>().Count(), "Failed using the session after scope.");
-				if (count != 1)
+				const int expectedCount = 1;
+				if (count != expectedCount)
 					// We are not testing that here, so just issue a warning. Do not use DodgeTransactionCompletionDelayIfRequired
 					// before previous assert. We want to ascertain the session is usable in any cases.
-					Assert.Warn("Unexpected entity count: {0} instead of {1}. The transaction seems to have a delayed commit.", count, 1);
+					Assert.Warn($"Unexpected entity count: {count} instead of {expectedCount}. The transaction seems to have a delayed commit.");
 			}
 		}
 
@@ -513,6 +529,309 @@ namespace NHibernate.Test.SystemTransactions
 			using (var s = OpenSession())
 			{
 				Assert.DoesNotThrow(() => s.JoinTransaction());
+			}
+		}
+
+		[Theory]
+		public void CanUseDependentTransaction(bool explicitFlush)
+		{
+			if (!TestDialect.SupportsDependentTransaction)
+				Assert.Ignore("Dialect does not support dependent transactions");
+			IgnoreIfUnsupported(explicitFlush);
+
+			try
+			{
+				using (var committable = new CommittableTransaction())
+				{
+					System.Transactions.Transaction.Current = committable;
+					using (var clone = committable.DependentClone(DependentCloneOption.RollbackIfNotComplete))
+					{
+						System.Transactions.Transaction.Current = clone;
+
+						using (var s = OpenSession())
+						{
+							if (!AutoJoinTransaction)
+								s.JoinTransaction();
+							s.Save(new Person());
+
+							if (explicitFlush)
+								s.Flush();
+							clone.Complete();
+						}
+					}
+
+					System.Transactions.Transaction.Current = committable;
+					committable.Commit();
+				}
+			}
+			finally
+			{
+				System.Transactions.Transaction.Current = null;
+			}
+		}
+
+		[Theory]
+		public void CanUseSessionWithManyDependentTransaction(bool explicitFlush)
+		{
+			if (!TestDialect.SupportsDependentTransaction)
+				Assert.Ignore("Dialect does not support dependent transactions");
+			IgnoreIfUnsupported(explicitFlush);
+			// ODBC with SQL-Server always causes system transactions to go distributed, which causes their transaction completion to run
+			// asynchronously. But ODBC enlistment also check the previous transaction in a way that do not guard against it
+			// being concurrently disposed of. See https://github.com/nhibernate/nhibernate-core/pull/1505 for more details.
+			if (Sfi.ConnectionProvider.Driver is OdbcDriver)
+				Assert.Ignore("ODBC sometimes fails on second scope by checking the previous transaction status, which may yield an object disposed exception");
+			// SAP HANA & SQL Anywhere .Net providers always cause system transactions to be distributed, causing them to
+			// complete on concurrent threads. This creates race conditions when chaining scopes, the subsequent scope usage
+			// finding the connection still enlisted in the previous transaction, its complete being still not finished
+			// on its own thread.
+			if (Sfi.ConnectionProvider.Driver is HanaDriverBase || Sfi.ConnectionProvider.Driver is SapSQLAnywhere17Driver)
+				Assert.Ignore("SAP HANA and SQL Anywhere scope handling causes concurrency issues preventing chaining scope usages.");
+
+			try
+			{
+				using (var s = WithOptions().ConnectionReleaseMode(ConnectionReleaseMode.OnClose).OpenSession())
+				{
+					using (var committable = new CommittableTransaction())
+					{
+						System.Transactions.Transaction.Current = committable;
+						using (var clone = committable.DependentClone(DependentCloneOption.RollbackIfNotComplete))
+						{
+							System.Transactions.Transaction.Current = clone;
+							if (!AutoJoinTransaction)
+								s.JoinTransaction();
+							// Acquire the connection
+							var count = s.Query<Person>().Count();
+							Assert.That(count, Is.EqualTo(0), "Unexpected initial entity count.");
+							clone.Complete();
+						}
+
+						using (var clone = committable.DependentClone(DependentCloneOption.RollbackIfNotComplete))
+						{
+							System.Transactions.Transaction.Current = clone;
+							if (!AutoJoinTransaction)
+								s.JoinTransaction();
+							s.Save(new Person());
+
+							if (explicitFlush)
+								s.Flush();
+
+							clone.Complete();
+						}
+
+						using (var clone = committable.DependentClone(DependentCloneOption.RollbackIfNotComplete))
+						{
+							System.Transactions.Transaction.Current = clone;
+							if (!AutoJoinTransaction)
+								s.JoinTransaction();
+							var count = s.Query<Person>().Count();
+							Assert.That(count, Is.EqualTo(1), "Unexpected entity count after committed insert.");
+							clone.Complete();
+						}
+
+						System.Transactions.Transaction.Current = committable;
+						committable.Commit();
+					}
+				}
+			}
+			finally
+			{
+				System.Transactions.Transaction.Current = null;
+			}
+
+			using (var s = OpenSession())
+			{
+				using (var tx = new TransactionScope())
+				{
+					if (!AutoJoinTransaction)
+						s.JoinTransaction();
+					var count = s.Query<Person>().Count();
+					Assert.That(count, Is.EqualTo(1), "Unexpected entity count after global commit.");
+					tx.Complete();
+				}
+			}
+		}
+
+		// This test check a concurrency issue hard to reproduce. If it is flaky, it has to be considered failing.
+		// In such case, raise triesCount to investigate it locally with more chances of triggering the trouble.
+		[Test]
+		public void SupportsTransactionTimeout()
+		{
+			Assume.That(TestDialect.SupportsTransactionScopeTimeouts, Is.True, "The tested dialect is not supported for transaction scope timeouts.");
+			// Other special cases: ODBC and SAP SQL Anywhere succeed this test only with transaction.ignore_session_synchronization_failures
+			// enabled.
+			// They freeze the session during the transaction cancellation. To avoid the test to be very long, the synchronization
+			// lock timeout should be lowered too.
+
+			// A concurrency issue exists with the legacy setting allowing to use the session from transaction completion, which
+			// may cause session leaks. Ignore them.
+			FailOnNotClosedSession = !UseConnectionOnSystemTransactionPrepare;
+
+			// Test case adapted from https://github.com/kaksmet/NHibBugRepro
+
+			// Create some test data.
+			const int entitiesCount = 5000;
+			using (var s = OpenSession())
+			using (var t = s.BeginTransaction())
+			{
+				for (var i = 0; i < entitiesCount; i++)
+				{
+					var person = new Person
+					{
+						NotNullData = Guid.NewGuid().ToString()
+					};
+
+					s.Save(person);
+				}
+
+				t.Commit();
+			}
+
+			// Setup unhandled exception catcher.
+			_unhandledExceptions = new ConcurrentBag<object>();
+			AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+			try
+			{
+				// Generate transaction timeouts.
+				const int triesCount = 100;
+				var txOptions = new TransactionOptions { Timeout = TimeSpan.FromMilliseconds(1) };
+				var timeoutsCount = 0;
+				for (var i = 0; i < triesCount; i++)
+				{
+					try
+					{
+						using var txScope = new TransactionScope(TransactionScopeOption.Required, txOptions);
+						using var session = OpenSession();
+						var data = session.CreateCriteria<Person>().List();
+						Assert.That(data, Has.Count.EqualTo(entitiesCount), "Unexpected count of loaded entities.");
+						Thread.Sleep(2);
+						var count = session.Query<Person>().Count();
+						Assert.That(count, Is.EqualTo(entitiesCount), "Unexpected entities count.");
+						txScope.Complete();
+					}
+					catch
+					{
+						// Assume that is a transaction timeout. It may cause various failures, of which some are hard to identify.
+						timeoutsCount++;
+					}
+					// If in need of checking some specific failures, the following code may be used instead:
+					/*
+					catch (Exception ex)
+					{
+						var currentEx = ex;
+						// Depending on where the transaction aborption has broken NHibernate processing, we may
+						// get various exceptions, like directly a TransactionAbortedException with an inner
+						// TimeoutException, or a HibernateException encapsulating a TransactionException with a
+						// timeout, ...
+						bool isTransactionException, isTimeout;
+						do
+						{
+							isTransactionException = currentEx is System.Transactions.TransactionException;
+							isTimeout = isTransactionException && currentEx is TransactionAbortedException;
+							currentEx = currentEx.InnerException;
+						}
+						while (!isTransactionException && currentEx != null);
+						while (!isTimeout && currentEx != null)
+						{
+							isTimeout = currentEx is TimeoutException;
+							currentEx = currentEx?.InnerException;
+						}
+
+						if (!isTimeout)
+						{
+							// We may also get a GenericADOException with an InvalidOperationException stating the
+							// transaction associated to the connection is no more active but not yet suppressed,
+							// and that for executing some SQL, we need to suppress it. That is a weak way of
+							// identifying the case, especially with the many localizations of the message.
+							currentEx = ex;
+							do
+							{
+								isTimeout = currentEx is InvalidOperationException && currentEx.Message.Contains("SQL");
+								currentEx = currentEx?.InnerException;
+							}
+							while (!isTimeout && currentEx != null);
+						}
+
+						if (isTimeout)
+							timeoutsCount++;
+						else
+							throw;
+					}
+					*/
+				}
+
+				Assert.That(
+					_unhandledExceptions.Count,
+					Is.EqualTo(0),
+					$"Unhandled exceptions have occurred: {string.Join(@"
+
+", _unhandledExceptions)}");
+
+				// Despite the Thread sleep and the count of entities to load, this test may get the timeout only for slightly
+				// more than 10% of the attempts.
+				Warn.Unless(timeoutsCount, Is.GreaterThan(5), "The test should have generated more timeouts.");
+			}
+			finally
+			{
+				AppDomain.CurrentDomain.UnhandledException -= CurrentDomain_UnhandledException;
+			}
+		}
+
+		private ConcurrentBag<object> _unhandledExceptions;
+
+		private void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
+		{
+			if (e.ExceptionObject is Exception exception)
+			{
+				// Ascertain NHibernate is involved. Some unhandled exceptions occur due to the
+				// TransactionScope timeout operating on an unexpected thread for the data provider.
+				var isNHibernateInvolved = false;
+				while (exception != null && !isNHibernateInvolved)
+				{
+					isNHibernateInvolved = exception.StackTrace != null && exception.StackTrace.ToLowerInvariant().Contains("nhibernate");
+					exception = exception.InnerException;
+				}
+				if (!isNHibernateInvolved)
+					return;
+			}
+			_unhandledExceptions.Add(e.ExceptionObject);
+		}
+
+		[Theory, Explicit("Bench")]
+		public void BenchTransactionAccess(bool inTransaction)
+		{
+			var currentTransaction = System.Transactions.Transaction.Current;
+			using (inTransaction ? new TransactionScope() : null)
+			using (var s = OpenSession())
+			{
+				var impl = s.GetSessionImplementation();
+				var transactionContext = impl.TransactionContext;
+				if (inTransaction)
+					s.JoinTransaction();
+
+				// warm-up
+				for (var i = 0; i < 10; i++)
+					currentTransaction = System.Transactions.Transaction.Current;
+				for (var i = 0; i < 10; i++)
+					transactionContext = impl.TransactionContext;
+
+				var sw = new Stopwatch();
+				for (var j = 0; j < 4; j++)
+				{
+					sw.Restart();
+					for (var i = 0; i < 10000; i++)
+						currentTransaction = System.Transactions.Transaction.Current;
+					sw.Stop();
+					Assert.That(currentTransaction, inTransaction ? Is.Not.Null : Is.Null);
+
+					Console.WriteLine($"Current transaction reads have taken {sw.Elapsed}");
+					sw.Restart();
+					for (var i = 0; i < 10000; i++)
+						transactionContext = impl.TransactionContext;
+					sw.Stop();
+					Assert.That(transactionContext, inTransaction ? Is.Not.Null : Is.Null);
+					Console.WriteLine($"Transaction context reads have taken {sw.Elapsed}");
+				}
 			}
 		}
 	}

@@ -110,7 +110,6 @@ namespace NHibernate.Test.DriverTest
 				$"Default {nameof(Oracle8iDialect.UseNPrefixedTypesForUnicode)} values mismatch between driver and dialect");
 		}
 
-
 		private static OracleDataClientDriverBase GetDriver(bool managed, IDictionary<string, string> settings)
 		{
 			OracleDataClientDriverBase driver = null;
@@ -122,7 +121,7 @@ namespace NHibernate.Test.DriverTest
 			}
 			catch (Exception ex)
 			{
-				Assert.Ignore("Unable to load the driver: {0}", ex);
+				Assert.Ignore($"Unable to load the driver: {ex}");
 			}
 
 			driver.Configure(settings);

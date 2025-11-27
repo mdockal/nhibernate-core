@@ -14,15 +14,17 @@ namespace NHibernate.Test.BulkManipulation
 	[TestFixture]
 	public class NativeSQLBulkOperationsWithCache : TestCase
 	{
+		protected override string CacheConcurrencyStrategy => "nonstrict-read-write";
+
 		protected override string MappingsAssembly => "NHibernate.Test";
 
 		protected override string[] Mappings => new[] { "BulkManipulation.Vehicle.hbm.xml" };
 
 		protected override void Configure(Configuration configuration)
 		{
-			cfg.SetProperty(Environment.UseQueryCache, "true");
-			cfg.SetProperty(Environment.UseSecondLevelCache, "true");
-			cfg.SetProperty(Environment.CacheProvider, typeof(SubstituteCacheProvider).AssemblyQualifiedName);
+			configuration.SetProperty(Environment.UseQueryCache, "true");
+			configuration.SetProperty(Environment.UseSecondLevelCache, "true");
+			configuration.SetProperty(Environment.CacheProvider, typeof(SubstituteCacheProvider).AssemblyQualifiedName);
 		}
 
 		[Test]
@@ -39,7 +41,6 @@ namespace NHibernate.Test.BulkManipulation
 
 				using (var t = s.BeginTransaction())
 				{
-
 					s.CreateSQLQuery(ssql).ExecuteUpdate();
 					t.Commit();
 

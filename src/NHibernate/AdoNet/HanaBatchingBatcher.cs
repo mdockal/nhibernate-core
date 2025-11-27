@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data.Common;
 using System.Text;
 using NHibernate.AdoNet.Util;
+using NHibernate.Driver;
 using NHibernate.Exceptions;
 
 namespace NHibernate.AdoNet
@@ -17,7 +18,7 @@ namespace NHibernate.AdoNet
 		private int _countOfCommands;
 		private int _totalExpectedRowsAffected;
 		private DbCommand _currentBatch;
-		private readonly IList<DbCommand> _currentBatchCommands = new List<DbCommand>();
+		private readonly List<DbCommand> _currentBatchCommands = new List<DbCommand>();
 		private StringBuilder _currentBatchCommandsLog;
 
 		public HanaBatchingBatcher(ConnectionManager connectionManager, IInterceptor interceptor)
@@ -34,7 +35,7 @@ namespace NHibernate.AdoNet
 		public override void AddToBatch(IExpectation expectation)
 		{
 			// HanaCommands are cloneable
-			if (!(CurrentCommand is ICloneable cloneableCurrentCommand))
+			if (!(Driver.UnwrapDbCommand(CurrentCommand) is ICloneable cloneableCurrentCommand))
 				throw new InvalidOperationException("Current command is not an ICloneable");
 
 			var batchUpdate = CurrentCommand;

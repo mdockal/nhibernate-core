@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Globalization;
@@ -58,6 +58,9 @@ namespace NHibernate.Type
 		{
 			var parameter = cmd.Parameters[index];
 
+			if (value is Enum)
+				value = value.ToString();
+
 			//Allow the driver to adjust the parameter for the value
 			session.Factory.ConnectionProvider.Driver.AdjustParameterForValue(parameter, SqlType, value);
 
@@ -71,11 +74,6 @@ namespace NHibernate.Type
 		public override object Get(DbDataReader rs, int index, ISessionImplementor session)
 		{
 			return Convert.ToString(rs[index]);
-		}
-
-		public override object Get(DbDataReader rs, string name, ISessionImplementor session)
-		{
-			return Convert.ToString(rs[name]);
 		}
 
 		public override bool IsEqual(object x, object y)
@@ -131,10 +129,9 @@ namespace NHibernate.Type
 
 		#region ILiteralType Members
 
+		/// <inheritdoc />
 		public string ObjectToSQLString(object value, Dialect.Dialect dialect)
-		{
-			return "'" + (string)value + "'";
-		}
+			=> dialect.ToStringLiteral((string)value, SqlType);
 
 		#endregion
 

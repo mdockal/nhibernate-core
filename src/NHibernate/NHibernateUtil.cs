@@ -138,6 +138,11 @@ namespace NHibernate
 		public static readonly DateType Date = new DateType();
 
 		/// <summary>
+		/// NHibernate local date type
+		/// </summary>
+		public static readonly DateType LocalDate = new LocalDateType();
+
+		/// <summary>
 		/// NHibernate decimal type
 		/// </summary>
 		public static readonly DecimalType Decimal = new DecimalType();
@@ -268,7 +273,14 @@ namespace NHibernate
 		/// NHibernate class meta type for association of kind <code>any</code>.
 		/// </summary>
 		/// <seealso cref="AnyType"/>
+		[Obsolete("Use MetaType without meta-values instead.")]
 		public static readonly ClassMetaType ClassMetaType = new ClassMetaType();
+
+		/// <summary>
+		/// NHibernate meta type for association of kind <code>any</code> without meta-values.
+		/// </summary>
+		/// <seealso cref="AnyType"/>
+		public static readonly MetaType MetaType = new MetaType(null, String);
 
 		/// <summary>
 		/// NHibernate serializable type
@@ -279,7 +291,6 @@ namespace NHibernate
 		/// NHibernate System.Object type
 		/// </summary>
 		public static readonly AnyType Object = new AnyType();
-
 
 		//		/// <summary>
 		//		/// NHibernate blob type
@@ -376,7 +387,6 @@ namespace NHibernate
 			}
 		}
 
-
 		/// <summary>
 		/// Force initialization of a proxy or persistent collection.
 		/// </summary>
@@ -401,7 +411,6 @@ namespace NHibernate
 			{
 				persistent.ForceInitialization();
 			}
-
 		}
 
 		/// <summary>
@@ -550,7 +559,6 @@ namespace NHibernate
 			hibernateEnumerable.Dispose();
 		}
 
-
 		/// <summary> 
 		/// Check if the property is initialized. If the named property does not exist
 		/// or is not persistent, this method always returns <tt>true</tt>. 
@@ -581,9 +589,9 @@ namespace NHibernate
 				entity = proxy;
 			}
 
-			if (FieldInterceptionHelper.IsInstrumented(entity))
+			if (entity is IFieldInterceptorAccessor interceptorAccessor)
 			{
-				IFieldInterceptor interceptor = FieldInterceptionHelper.ExtractFieldInterceptor(entity);
+				var interceptor = interceptorAccessor.FieldInterceptor;
 				return interceptor == null || interceptor.IsInitializedField(propertyName);
 			}
 			else

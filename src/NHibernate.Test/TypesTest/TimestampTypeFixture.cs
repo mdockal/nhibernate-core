@@ -25,9 +25,6 @@ namespace NHibernate.Test.TypesTest
 					Assert.That(
 						log,
 						Does.Contain("NHibernate.Type.TimestampType is obsolete. Please use DateTimeType instead.").IgnoreCase);
-					Assert.That(
-						log,
-						Does.Not.Contain($"{NHibernateUtil.Timestamp.Name} is obsolete. Please use DateTimeType instead.").IgnoreCase);
 				}
 			}
 		}

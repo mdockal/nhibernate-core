@@ -1,7 +1,9 @@
 ﻿using System.Collections.Generic;
-using System.Linq;
 using NHibernate.Engine;
 using NHibernate.Hql.Ast.ANTLR.Tree;
+using NHibernate.Linq;
+using NHibernate.Loader.Hql;
+using NHibernate.Util;
 
 namespace NHibernate.Hql.Ast.ANTLR
 {
@@ -16,16 +18,33 @@ namespace NHibernate.Hql.Ast.ANTLR
 	{
 		public IQueryTranslator[] CreateQueryTranslators(IQueryExpression queryExpression, string collectionRole, bool shallow, IDictionary<string, IFilter> filters, ISessionFactoryImplementor factory)
 		{
-			return CreateQueryTranslators(queryExpression.Translate(factory, collectionRole != null), queryExpression.Key, collectionRole, shallow, filters, factory);
+			return CreateQueryTranslators(queryExpression, queryExpression.Translate(factory, collectionRole != null), queryExpression.Key, collectionRole, shallow, filters, factory);
 		}
 
-		static IQueryTranslator[] CreateQueryTranslators(IASTNode ast, string queryIdentifier, string collectionRole, bool shallow, IDictionary<string, IFilter> filters, ISessionFactoryImplementor factory)
+		static IQueryTranslator[] CreateQueryTranslators(
+			IQueryExpression queryExpression,
+			IASTNode ast,
+			string queryIdentifier,
+			string collectionRole,
+			bool shallow,
+			IDictionary<string, IFilter> filters,
+			ISessionFactoryImplementor factory)
 		{
 			var polymorphicParsers = AstPolymorphicProcessor.Process(ast, factory);
 
 			var translators = polymorphicParsers
-							.Select(hql => new QueryTranslatorImpl(queryIdentifier, hql, filters, factory))
-							.ToArray();
+				.ToArray(hql => queryExpression is ILinqQueryExpression linqExpression
+							? new QueryTranslatorImpl(queryIdentifier, 
+							                          hql, 
+							                          filters,
+							                          factory, 
+							                          new QueryLoaderFactory(),
+							                          linqExpression.GetNamedParameterTypes())
+							: new QueryTranslatorImpl(queryIdentifier, 
+							                          hql, 
+							                          filters, 
+							                          factory, 
+							                          new QueryLoaderFactory()));
 
 			foreach (var translator in translators)
 			{
@@ -40,7 +59,6 @@ namespace NHibernate.Hql.Ast.ANTLR
 			}
 
 			return translators;
-			
 		}
 	}
 }

@@ -1,34 +1,36 @@
 ﻿using System.Data;
+using NHibernate.Cfg;
 using NHibernate.Dialect;
 using NHibernate.Driver;
 using NHibernate.Mapping;
+using NHibernate.SqlTypes;
 using NUnit.Framework;
 
 namespace NHibernate.Test.NHSpecificTest.NH2302
 {
-    [TestFixture]
-    public class Fixture : BugTestCase
-    {
-		protected override void Configure(Cfg.Configuration configuration)
+	[TestFixture]
+	public class Fixture : BugTestCase
+	{
+		protected override void AddMappings(Configuration configuration)
 		{
+			base.AddMappings(configuration);
+
 			foreach (var cls in configuration.ClassMappings)
 			{
 				foreach (var prop in cls.PropertyIterator)
 				{
 					foreach (var col in prop.ColumnIterator)
 					{
-						if (col is Column)
+						if (col is Column column && column.SqlType == "nvarchar(max)")
 						{
-							var column = col as Column;
-							if (column.SqlType == "nvarchar(max)")
-								column.SqlType = Dialect.GetLongestTypeName(DbType.String);
+							column.SqlType = Dialect.GetLongestTypeName(DbType.String);
 						}
 					}
 				}
 			}
 		}
 
-        protected override void OnTearDown()
+		protected override void OnTearDown()
         {
             CleanUp();
 
@@ -40,6 +42,9 @@ namespace NHibernate.Test.NHSpecificTest.NH2302
         {
 			if (Sfi.ConnectionProvider.Driver is OdbcDriver || Dialect is MsSqlCeDialect)
 				Assert.Ignore("NH-4065, not fixed for Odbc and MsSqlCe");
+
+			if (Dialect.GetTypeName(SqlTypeFactory.GetString(10000)) != Dialect.GetLongestTypeName(DbType.String))
+				Assert.Ignore("Current dialect does support limited strings of 10 000 characters");
 
             int id;
             // buildup a string the exceed the mapping
@@ -199,6 +204,5 @@ namespace NHibernate.Test.NHSpecificTest.NH2302
         {
             return new string('a', 12000);
         }
-
-    }
+	}
 }

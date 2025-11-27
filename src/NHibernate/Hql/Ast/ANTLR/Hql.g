@@ -19,6 +19,7 @@ tokens
 	BETWEEN='between';
 	CLASS='class';
 	COUNT='count';
+	CROSS='cross';
 	DELETE='delete';
 	DESCENDING='desc';
 	DOT;
@@ -254,11 +255,16 @@ fromClause
 
 fromJoin
 	: ( ( ( LEFT | RIGHT ) (OUTER)? ) | FULL | INNER )? JOIN^ (FETCH)? path (asAlias)? (propertyFetch)? (withClause)?
+	| ( ( ( LEFT | RIGHT ) (OUTER)? ) | FULL | INNER )? JOIN^ OPEN! selectStatement CLOSE! (asAlias)? (withClause)?
 	| ( ( ( LEFT | RIGHT ) (OUTER)? ) | FULL | INNER )? JOIN^ (FETCH)? ELEMENTS! OPEN! path CLOSE! (asAlias)? (propertyFetch)? (withClause)?
+	| CROSS JOIN^ { WeakKeywords(); } path (asAlias)? (propertyFetch)?
 	;
 
 withClause
 	: WITH^ logicalExpression
+	| ON logicalExpression 
+	// it's really just a WITH clause, so treat it as such...
+		-> ^(WITH["with"] logicalExpression)
 	;
 
 fromRange
@@ -301,7 +307,7 @@ alias
 
 propertyFetch
 	: FETCH ALL! PROPERTIES!
-	;
+	| (FETCH path)+;
 
 groupByClause
 	: GROUP^ 
@@ -524,22 +530,30 @@ unaryExpression
 	;
 	
 caseExpression
-	: CASE (whenClause)+ (elseClause)? END
-		-> ^(CASE whenClause+ elseClause?) 
-	| CASE unaryExpression (altWhenClause)+ (elseClause)? END
-		-> ^(CASE2 unaryExpression altWhenClause+ elseClause?)
+	: simpleCaseStatement
+	| searchedCaseStatement
 	;
-	
-whenClause
-	: (WHEN^ logicalExpression THEN! expression)
+
+simpleCaseStatement
+	: CASE expression (simpleCaseWhenClause)+ (elseClause)? END
+		-> ^(CASE2 expression simpleCaseWhenClause+ elseClause?)
 	;
-	
-altWhenClause
-	: (WHEN^ unaryExpression THEN! expression)
+
+simpleCaseWhenClause
+	: (WHEN^ expression THEN! expression)
 	;
 	
 elseClause
 	: (ELSE^ expression)
+	;
+
+searchedCaseStatement
+	: CASE (searchedCaseWhenClause)+ (elseClause)? END
+		-> ^(CASE searchedCaseWhenClause+ elseClause?)
+	;
+
+searchedCaseWhenClause
+	: (WHEN^ logicalExpression THEN! expression)
 	;
 	
 quantifiedExpression
@@ -586,7 +600,7 @@ vectorExpr
 // NOTE: handleDotIdent() is called immediately after the first IDENT is recognized because
 // the method looks a head to find keywords after DOT and turns them into identifiers.
 identPrimary
-	: identifier { HandleDotIdent(); }
+	: identifier {{ HandleDotIdent(); }}
 			( options {greedy=true;} : DOT^ ( identifier | o=OBJECT { $o.Type = IDENT; } ) )*
 			( ( op=OPEN^ { $op.Type = METHOD_CALL;} exprList CLOSE! )
 			)?
@@ -600,8 +614,8 @@ identPrimary
 //## aggregateFunction:
 //##     COUNT | 'sum' | 'avg' | 'max' | 'min';
 aggregate
-	: ( op=SUM | op=AVG | op=MAX | op=MIN ) OPEN additiveExpression CLOSE
-		-> ^(AGGREGATE[$op] additiveExpression)
+	: ( op=SUM | op=AVG | op=MAX | op=MIN ) OPEN aggregateArgument CLOSE
+		-> ^(AGGREGATE[$op] aggregateArgument)
 	// Special case for count - It's 'parameters' can be keywords.
 	|  COUNT OPEN ( s=STAR | p=aggregateDistinctAll ) CLOSE
 		-> {s == null}? ^(COUNT $p)
@@ -609,10 +623,18 @@ aggregate
 	|  collectionExpr
 	;
 
-aggregateDistinctAll
-	: ( ( DISTINCT | ALL )? ( path | collectionExpr ) )
+aggregateArgument
+	: ( additiveExpression | selectStatement )
 	;
-	
+
+aggregateDistinctAll
+	: ( distinctAll? aggregateArgument )
+	;
+
+distinctAll
+	: {input.LA(1) == DISTINCT || input.LA(1) == ALL}? ( DISTINCT | ALL ) 
+	;
+
 //## collection: ( OPEN query CLOSE ) | ( 'elements'|'indices' OPEN path CLOSE );
 
 collectionExpr
@@ -673,10 +695,9 @@ constant
 
 path
 @init {
-// TODO - need to clean up DotIdent - suspect that DotIdent2 supersedes the other one, but need to do the analysis
-//HandleDotIdent2();
+HandleDotIdents();
 }
-	: identifier ( DOT^ { WeakKeywords(); } identifier )*
+	: identifier ( DOT^ identifier )*
 	;
 
 // Wraps the IDENT token from the lexer, in order to provide

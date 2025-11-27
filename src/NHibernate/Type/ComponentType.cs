@@ -78,6 +78,30 @@ namespace NHibernate.Type
 			}
 		}
 
+		internal ComponentType(
+			IType[] propertyTypes,
+			string[] propertyNames,
+			bool[] propertyNullability,
+			int propertySpan,
+			CascadeStyle[] cascade,
+			FetchMode?[] joinedFetch,
+			bool isKey,
+			bool overridesGetHashCode,
+			IComponentTuplizer tuplizer,
+			EntityMode entityMode)
+		{
+			this.propertyTypes = propertyTypes;
+			this.propertyNames = propertyNames;
+			this.propertyNullability = propertyNullability;
+			this.propertySpan = propertySpan;
+			this.cascade = cascade;
+			this.joinedFetch = joinedFetch;
+			this.isKey = isKey;
+			this.overridesGetHashCode = overridesGetHashCode;
+			ComponentTuplizer = tuplizer;
+			EntityMode = entityMode;
+		}
+
 		/// <summary></summary>
 		public override bool IsCollectionType
 		{
@@ -132,14 +156,6 @@ namespace NHibernate.Type
 			{
 				return false;
 			}
-			/* 
-			 * NH Different behavior : we don't use the shortcut because NH-1101 
-			 * let the tuplizer choose how cosiderer properties when the component is null.
-			 */
-			if (EntityMode != EntityMode.Poco && (x == null || y == null))
-			{
-				return true;
-			}
 			object[] xvalues = GetPropertyValues(x);
 			object[] yvalues = GetPropertyValues(y);
 			for (int i = 0; i < xvalues.Length; i++)
@@ -157,14 +173,6 @@ namespace NHibernate.Type
 			if (x == y)
 			{
 				return false;
-			}
-			/* 
-			 * NH Different behavior : we don't use the shortcut because NH-1101 
-			 * let the tuplizer choose how cosiderer properties when the component is null.
-			 */
-			if (EntityMode != EntityMode.Poco && (x == null || y == null))
-			{
-				return true;
 			}
 			object[] xvalues = GetPropertyValues(x);
 			object[] yvalues = GetPropertyValues(y);

@@ -10,12 +10,15 @@
 
 using System;
 using System.Collections;
+using System.Linq;
 using NHibernate.Dialect;
 using NUnit.Framework;
+using NHibernate.Linq;
 
 namespace NHibernate.Test.CompositeId
 {
 	using System.Threading.Tasks;
+	using System.Threading;
 	[TestFixture]
 	public class CompositeIdFixtureAsync : TestCase
 	{
@@ -31,14 +34,9 @@ namespace NHibernate.Test.CompositeId
 				return new string[]
 				       	{
 				       		"CompositeId.Customer.hbm.xml", "CompositeId.Order.hbm.xml", "CompositeId.LineItem.hbm.xml",
-				       		"CompositeId.Product.hbm.xml"
+				       		"CompositeId.Product.hbm.xml", "CompositeId.Shipper.hbm.xml"
 				       	};
 			}
-		}
-
-		protected override string CacheConcurrencyStrategy
-		{
-			get { return null; }
 		}
 
 		protected override bool AppliesTo(Dialect.Dialect dialect)
@@ -79,9 +77,13 @@ namespace NHibernate.Test.CompositeId
 
 				Order o = new Order(c);
 				o.OrderDate = DateTime.Today;
+				o.Shipper = new Shipper() { Id = new NullableId(null, 13) };
+				await (s.PersistAsync(o));
+				
 				LineItem li = new LineItem(o, p);
 				li.Quantity = 2;
-
+				await (s.PersistAsync(li));
+				
 				await (t.CommitAsync());
 			}
 
@@ -138,7 +140,19 @@ namespace NHibernate.Test.CompositeId
 				await (t.CommitAsync());
 			}
 
-			
+			using (s = OpenSession())
+			{
+				t = s.BeginTransaction();
+				var noShippersForWarehouse = await (s.Query<Order>()
+					// NOTE: .Where(x => x.Shipper.Id == new NullableId(null, 13)) improperly renders
+					// "where (ShipperId = @p1 and WarehouseId = @p2)" with @p1 = NULL (needs to be is null)
+					// But the effort to fix is pretty high due to how component tuples are managed in linq / hql.
+					.Where(x => x.Shipper.Id.WarehouseId == 13 && x.Shipper.Id.Id == null)
+					.ToListAsync());
+				Assert.AreEqual(1, noShippersForWarehouse.Count);
+				await (t.CommitAsync());
+			}
+
 			using (s = OpenSession())
 			{
 				t = s.BeginTransaction();
@@ -203,8 +217,8 @@ namespace NHibernate.Test.CompositeId
 			Assert.AreEqual(2, c.Orders.Count);
 			Assert.IsTrue(NHibernateUtil.IsInitialized(((Order) c.Orders[0]).LineItems));
 			Assert.IsTrue(NHibernateUtil.IsInitialized(((Order) c.Orders[1]).LineItems));
-			Assert.AreEqual(((Order) c.Orders[0]).LineItems.Count, 2);
-			Assert.AreEqual(((Order) c.Orders[1]).LineItems.Count, 2);
+			Assert.AreEqual(2, ((Order) c.Orders[0]).LineItems.Count);
+			Assert.AreEqual(2, ((Order) c.Orders[1]).LineItems.Count);
 			await (t.CommitAsync());
 			s.Close();
 
@@ -296,6 +310,25 @@ namespace NHibernate.Test.CompositeId
 			await (s.CreateQuery("from LineItem ol where ol.Order.Id.CustomerId = 'C111'").ListAsync());
 			await (t.CommitAsync());
 			s.Close();
+		}
+
+		[Test(Description = "GH-2646")]
+		public async Task AnyOnCompositeIdAsync()
+		{
+			using (var s = OpenSession())
+			{
+				await (s.Query<Order>().Where(o => o.LineItems.Any()).ToListAsync());
+				await (s.Query<Order>().Select(o => o.LineItems.Any()).ToListAsync());
+			}
+		}
+
+		public async Task NullCompositeIdAsync(CancellationToken cancellationToken = default(CancellationToken))
+		{
+			using (var s = OpenSession())
+			{
+				await (s.Query<Order>().Where(o => o.LineItems.Any()).ToListAsync(cancellationToken));
+				await (s.Query<Order>().Select(o => o.LineItems.Any()).ToListAsync(cancellationToken));
+			}
 		}
 	}
 }

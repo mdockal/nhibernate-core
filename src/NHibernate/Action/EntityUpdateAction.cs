@@ -54,8 +54,11 @@ namespace NHibernate.Action
 			{
 				stopwatch = Stopwatch.StartNew();
 			}
-
-			bool veto = PreUpdate();
+			
+			if (PreUpdate())
+			{
+				return;
+			}
 
 			ISessionFactoryImplementor factory = Session.Factory;
 
@@ -74,10 +77,9 @@ namespace NHibernate.Action
 				slock = persister.Cache.Lock(ck, previousVersion);
 			}
 
-			if (!veto)
-			{
-				persister.Update(id, state, dirtyFields, hasDirtyCollection, previousState, previousVersion, instance, null, session);
-			}
+			
+			persister.Update(id, state, dirtyFields, hasDirtyCollection, previousState, previousVersion, instance, null, session);
+			
 
 			EntityEntry entry = Session.PersistenceContext.GetEntry(instance);
 			if (entry == null)
@@ -114,7 +116,7 @@ namespace NHibernate.Action
 				}
 				else
 				{
-					CacheEntry ce = CacheEntry.Create(state, persister, persister.HasUninitializedLazyProperties(instance), nextVersion, Session, instance);
+					CacheEntry ce = CacheEntry.Create(state, persister, nextVersion, Session, instance);
 					cacheEntry = persister.CacheEntryStructure.Structure(ce);
 
 					bool put = persister.Cache.Update(ck, cacheEntry, nextVersion, previousVersion);
@@ -128,7 +130,7 @@ namespace NHibernate.Action
 
 			PostUpdate();
 
-			if (statsEnabled && !veto)
+			if (statsEnabled)
 			{
 				stopwatch.Stop();
 				factory.StatisticsImplementor.UpdateEntity(Persister.EntityName, stopwatch.Elapsed);

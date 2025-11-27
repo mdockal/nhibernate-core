@@ -3,6 +3,8 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
+using System.Globalization;
+using System.Numerics;
 using NHibernate.Engine;
 using NHibernate.SqlTypes;
 
@@ -15,22 +17,24 @@ namespace NHibernate.Type
 	[Serializable]
 	public partial class UInt64Type : PrimitiveType, IDiscriminatorType, IVersionType
 	{
-		/// <summary></summary>
+		private static readonly object ZeroObject = 0UL;
+
+		/// <summary />
 		public UInt64Type() : base(SqlTypeFactory.UInt64)
 		{
 		}
 
-		public override string Name
-		{
-			get { return "UInt64"; }
-		}
+		public override string Name => "UInt64";
 
-		private static readonly UInt32 ZERO = 0;
 		public override object Get(DbDataReader rs, int index, ISessionImplementor session)
 		{
 			try
 			{
-				return Convert.ToUInt64(rs[index]);
+				return rs[index] switch
+				{
+					BigInteger bi => (ulong)bi,
+					var c => Convert.ToUInt64(c)
+				};
 			}
 			catch (Exception ex)
 			{
@@ -38,26 +42,11 @@ namespace NHibernate.Type
 			}
 		}
 
-		public override object Get(DbDataReader rs, string name, ISessionImplementor session)
-		{
-			try
-			{
-				return Convert.ToUInt64(rs[name]);
-			}
-			catch (Exception ex)
-			{
-				throw new FormatException(string.Format("Input string '{0}' was not in the correct format.", rs[name]), ex);
-			}
-		}
-
-		public override System.Type ReturnedClass
-		{
-			get { return typeof(UInt64); }
-		}
+		public override System.Type ReturnedClass => typeof(UInt64);
 
 		public override void Set(DbCommand rs, object value, int index, ISessionImplementor session)
 		{
-			rs.Parameters[index].Value = value;
+			rs.Parameters[index].Value = Convert.ToUInt64(value);
 		}
 
 		// 6.0 TODO: rename "xml" parameter as "value": it is not a xml string. The fact it generally comes from a xml
@@ -94,26 +83,17 @@ namespace NHibernate.Type
 			return 1;
 		}
 
-		public IComparer Comparator
-		{
-			get { return Comparer<UInt64>.Default; }
-		}
+		public IComparer Comparator => Comparer<UInt64>.Default;
 
 		#endregion
 
-		public override System.Type PrimitiveClass
-		{
-			get { return typeof(UInt64); }
-		}
+		public override System.Type PrimitiveClass => typeof(UInt64);
 
-		public override object DefaultValue
-		{
-			get { return ZERO; }
-		}
+		public override object DefaultValue => ZeroObject;
 
 		public override string ObjectToSQLString(object value, Dialect.Dialect dialect)
 		{
-			return value.ToString();
+			return ((ulong)value).ToString(CultureInfo.InvariantCulture);
 		}
 	}
 }

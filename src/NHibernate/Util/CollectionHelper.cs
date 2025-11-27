@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using Iesi.Collections.Generic;
 
 namespace NHibernate.Util
 {
@@ -219,6 +220,8 @@ namespace NHibernate.Util
 		{
 			return EmptyMapClass<TKey, TValue>.Instance;
 		}
+
+		internal static ISet<T> EmptySet<T>() => EmptyReadOnlySet<T>.Instance;
 
 		public static readonly ICollection EmptyCollection = EmptyMap;
 		// Since v5
@@ -460,6 +463,12 @@ namespace NHibernate.Util
 			}
 
 			#endregion
+		}
+
+		[Serializable]
+		private class EmptyReadOnlySet<T>
+		{
+			public static readonly ISet<T> Instance = new ReadOnlySet<T>(new HashSet<T>());
 		}
 
 		/// <summary>
@@ -723,6 +732,18 @@ namespace NHibernate.Util
 			=> FastCheckEquality(m1, m2) ??
 				(comparer == null ? DictionaryEquals(m1, m2, EqualityComparer<V>.Default) :
 					m1.All(kv => m2.TryGetValue(kv.Key, out var value) && comparer.Equals(kv.Value, value)));
+
+#if !NETCOREAPP2_0_OR_GREATER && !NETSTANDARD2_1_OR_GREATER
+		//It's added to make use of optimized .NET Core Dictionary.Remove(key, out value) method
+		public static bool Remove<TKey, TValue>(this Dictionary<TKey, TValue> dic, TKey key, out TValue value)
+		{
+			if (!dic.TryGetValue(key, out value))
+				return false;
+
+			dic.Remove(key);
+			return true;
+		}
+#endif
 
 		private static bool? FastCheckEquality<T>(IEnumerable<T> c1, IEnumerable<T> c2)
 		{

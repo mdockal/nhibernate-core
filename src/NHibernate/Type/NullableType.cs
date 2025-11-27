@@ -80,7 +80,10 @@ namespace NHibernate.Type
 		/// Most implementors just call the <see cref="Get(DbDataReader, int, ISessionImplementor)"/> 
 		/// overload of this method.
 		/// </remarks>
-		public abstract object Get(DbDataReader rs, string name, ISessionImplementor session);
+		// Since v5.6
+		[Obsolete("This method has no more usages and will be removed in a future version.")]
+		public virtual object Get(DbDataReader rs, string name, ISessionImplementor session) =>
+			Get(rs, rs.GetOrdinal(name), session);
 
 		/// <summary>
 		/// A representation of the value to be embedded in an XML element 
@@ -375,6 +378,15 @@ namespace NHibernate.Type
 		public override int GetHashCode()
 		{
 			return (SqlType.GetHashCode() / 2) + (Name.GetHashCode() / 2);
+		}
+
+		/// <summary>
+		/// Provides a more descriptive string representation by reporting the properties that are important for equality. 
+		/// Useful in error messages.
+		/// </summary>
+		public override string ToString()
+		{
+			return $"{base.ToString()} (SqlType: {SqlType})";
 		}
 
 		#endregion

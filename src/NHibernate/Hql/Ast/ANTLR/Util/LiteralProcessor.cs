@@ -44,7 +44,6 @@ namespace NHibernate.Hql.Ast.ANTLR.Util
 		/// </summary>
 		public static readonly int DECIMAL_LITERAL_FORMAT = EXACT;
 
-
 		public LiteralProcessor(HqlSqlWalker walker)
 		{
 			_walker = walker;
@@ -71,7 +70,7 @@ namespace NHibernate.Hql.Ast.ANTLR.Util
 			}
 			else
 			{
-				Object value = ReflectHelper.GetConstantValue(text);
+				var value = ReflectHelper.GetConstantValue(text, _walker.SessionFactoryHelper.Factory);
 				if (value == null)
 				{
 					throw new InvalidPathException("Invalid path: '" + text + "'");
@@ -131,7 +130,6 @@ namespace NHibernate.Hql.Ast.ANTLR.Util
 			}
 		}
 
-
 		public void ProcessConstant(SqlNode constant, bool resolveIdent)
 		{
 			// If the constant is an IDENT, figure out what it means...
@@ -151,6 +149,7 @@ namespace NHibernate.Hql.Ast.ANTLR.Util
 				if (isIdent && queryable != null)
 				{
 					constant.Text = queryable.DiscriminatorSQLValue;
+					constant.DataType = queryable.DiscriminatorType;
 				}
 				// Otherwise, it's a literal.
 				else
@@ -277,74 +276,9 @@ namespace NHibernate.Hql.Ast.ANTLR.Util
 
 			node.ClearChildren();	// Chop off the rest of the tree.
 
-			if (value is string)
-			{
-				node.Type = HqlSqlWalker.QUOTED_String;
-			}
-			else if (value is char)
-			{
-				node.Type = HqlSqlWalker.QUOTED_String;
-			}
-			else if (value is byte)
-			{
-				node.Type = HqlSqlWalker.NUM_INT;
-			}
-			else if (value is short)
-			{
-				node.Type = HqlSqlWalker.NUM_INT;
-			}
-			else if (value is int)
-			{
-				node.Type = HqlSqlWalker.NUM_INT;
-			}
-			else if (value is long)
-			{
-				node.Type = HqlSqlWalker.NUM_LONG;
-			}
-			else if (value is double)
-			{
-				node.Type = HqlSqlWalker.NUM_DOUBLE;
-			}
-			else if (value is decimal)
-			{
-				node.Type = HqlSqlWalker.NUM_DECIMAL;
-			}
-			else if (value is float)
-			{
-				node.Type = HqlSqlWalker.NUM_FLOAT;
-			}
-			else
-			{
-				node.Type = HqlSqlWalker.CONSTANT;
-			}
-
-			IType type;
-			try
-			{
-				type = TypeFactory.HeuristicType(value.GetType().Name);
-			}
-			catch (MappingException me)
-			{
-				throw new QueryException(me);
-			}
-
-			if (type == null)
-			{
-				throw new QueryException(LiteralProcessor.ErrorCannotDetermineType + node.Text);
-			}
-			try
-			{
-				ILiteralType literalType = (ILiteralType)type;
-				NHibernate.Dialect.Dialect dialect = _walker.SessionFactoryHelper.Factory.Dialect;
-				node.Text = literalType.ObjectToSQLString(value, dialect);
-			}
-			catch (Exception e)
-			{
-				throw new QueryException(LiteralProcessor.ErrorCannotFormatLiteral + node.Text, e);
-			}
-
-			node.DataType = type;
-			node.SetResolvedConstant(text);
+			node.Type = HqlSqlWalker.JAVA_CONSTANT;
+			node.DataType = TypeFactory.HeuristicType(value.GetType().Name);
+			node.SetResolvedConstant(text, value);
 		}
 
 		interface IDecimalFormatter
@@ -369,7 +303,6 @@ namespace NHibernate.Hql.Ast.ANTLR.Util
 				try
 				{
 					return number.ToString(FORMAT_STRING);
-
 				}
 				catch (Exception t)
 				{

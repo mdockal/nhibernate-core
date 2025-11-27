@@ -1,0 +1,36 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "configMigration": true,
+  "pruneStaleBranches": false,
+  "automerge": true,
+  "platformAutomerge": true,
+  "rebaseWhen": "never",
+  "labels": [
+    "dependencies",
+    "p: Lowest",
+    "t: Task"
+  ],
+  "packageRules": [
+    {
+      "matchSourceUrls": [
+        "https://github.com/nunit/nunit"
+      ],
+      "groupName": "NUnit"
+    },
+    {
+      "groupName": "Oracle.ManagedDataAccess",
+      "matchPackageNames": [
+        "Oracle.ManagedDataAccess{/,}**"
+      ]
+    },
+    {
+      "groupName": "NHibernate.Caches",
+      "matchPackageNames": [
+        "NHibernate.Caches{/,}**"
+      ]
+    }
+  ]
+}

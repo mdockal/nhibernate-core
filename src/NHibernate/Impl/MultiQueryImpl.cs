@@ -9,6 +9,7 @@ using NHibernate.Engine;
 using NHibernate.Engine.Query.Sql;
 using NHibernate.Exceptions;
 using NHibernate.Hql;
+using NHibernate.Loader;
 using NHibernate.Loader.Custom;
 using NHibernate.Loader.Custom.Sql;
 using NHibernate.SqlCommand;
@@ -27,7 +28,7 @@ namespace NHibernate.Impl
 		private readonly List<IQuery> queries = new List<IQuery>();
 		private readonly List<ITranslator> translators = new List<ITranslator>();
 		private readonly List<int> translatorQueryMap = new List<int>();
-		private readonly IList<System.Type> resultCollectionGenericType = new List<System.Type>();
+		private readonly List<System.Type> resultCollectionGenericType = new List<System.Type>();
 		private readonly List<QueryParameters> parameters = new List<QueryParameters>();
 		private IList queryResults;
 		private readonly Dictionary<string, int> queryResultPositions = new Dictionary<string, int>();
@@ -520,11 +521,10 @@ namespace NHibernate.Impl
 
 		protected List<object> DoList()
 		{
-			bool statsEnabled = session.Factory.Statistics.IsStatisticsEnabled;
-			var stopWatch = new Stopwatch();
-			if (statsEnabled)
+			Stopwatch stopWatch = null;
+			if (session.Factory.Statistics.IsStatisticsEnabled)
 			{
-				stopWatch.Start();
+				stopWatch = Stopwatch.StartNew();
 			}
 			int rowCount = 0;
 
@@ -533,6 +533,7 @@ namespace NHibernate.Impl
 			var hydratedObjects = new List<object>[Translators.Count];
 			List<EntityKey[]>[] subselectResultKeys = new List<EntityKey[]>[Translators.Count];
 			bool[] createSubselects = new bool[Translators.Count];
+			var cacheBatcher = new CacheBatcher(session);
 
 			try
 			{
@@ -586,7 +587,8 @@ namespace NHibernate.Impl
 
 							rowCount++;
 							object result = translator.Loader.GetRowFromResultSet(
-								reader, session, parameter, lockModeArray, optionalObjectKey, hydratedObjects[i], keys, true);
+								reader, session, parameter, lockModeArray, optionalObjectKey, hydratedObjects[i], keys, true, null, null,
+								(persister, data) => cacheBatcher.AddToBatch(persister, data));
 							tempResults.Add(result);
 
 							if (createSubselects[i])
@@ -616,13 +618,15 @@ namespace NHibernate.Impl
 						ITranslator translator = translators[i];
 						QueryParameters parameter = parameters[i];
 
-						translator.Loader.InitializeEntitiesAndCollections(hydratedObjects[i], reader, session, false);
+						translator.Loader.InitializeEntitiesAndCollections(hydratedObjects[i], reader, session, false, cacheBatcher);
 
 						if (createSubselects[i])
 						{
 							translator.Loader.CreateSubselects(subselectResultKeys[i], parameter, session);
 						}
 					}
+
+					cacheBatcher.ExecuteBatch();
 				}
 			}
 			catch (Exception sqle)
@@ -631,7 +635,7 @@ namespace NHibernate.Impl
 				throw ADOExceptionHelper.Convert(session.Factory.SQLExceptionConverter, sqle, "Failed to execute multi query", resultSetsCommand.Sql);
 			}
 
-			if (statsEnabled)
+			if (stopWatch != null)
 			{
 				stopWatch.Stop();
 				session.Factory.StatisticsImplementor.QueryExecuted(string.Format("{0} queries (MultiQuery)", translators.Count), rowCount, stopWatch.Elapsed);
@@ -770,7 +774,7 @@ namespace NHibernate.Impl
 			return combinedQueryParameters;
 		}
 
-		private IList<QueryParameters> Parameters
+		private List<QueryParameters> Parameters
 		{
 			get
 			{
@@ -799,13 +803,61 @@ namespace NHibernate.Impl
 
 	public interface ITranslator
 	{
+		// 6.0 TODO : replace by ILoader QueryLoader.
+		// Since 5.5.
+		[Obsolete("Use GetQueryLoader extension method instead.")]
 		Loader.Loader Loader { get; }
 		IType[] ReturnTypes { get; }
 		string[] ReturnAliases { get; }
 		ICollection<string> QuerySpaces { get; }
 	}
 
-	internal class HqlTranslatorWrapper : ITranslator
+	// 6.0 Todo : remove.
+	/// <summary>
+	/// Transitional interface for <see cref="ITranslator" />.
+	/// </summary>
+	public interface ITranslatorWithCustomizableLoader : ITranslator
+	{
+		// 6.0 : move into ITranslator.
+		/// <summary>
+		/// The query loader.
+		/// </summary>
+		ILoader QueryLoader { get; }
+	}
+
+	// 6.0 TODO: drop.
+	public static class TranslatorExtensions
+	{
+		private static readonly INHibernateLogger Log = NHibernateLogger.For(typeof(TranslatorExtensions));
+
+		// Non thread safe: not an issue, at worst it will cause a few more logs than one.
+		// Does not handle the possibility of using multiple different obsoleted translator implementations:
+		// only the first encountered will be logged.
+		private static bool _hasWarnedForObsoleteTranslator;
+
+		/// <summary>
+		/// Get the query loader.
+		/// </summary>
+		/// <param name="translator">The query translator.</param>
+		/// <returns>The query loader.</returns>
+		public static ILoader GetQueryLoader(this ITranslator translator)
+		{
+			if (translator is ITranslatorWithCustomizableLoader twcl)
+				return twcl.QueryLoader;
+
+			if (!_hasWarnedForObsoleteTranslator)
+			{
+				_hasWarnedForObsoleteTranslator = true;
+				Log.Warn("{0} is obsolete, it should implement {1} to support customizable loaders", translator, nameof(ITranslatorWithCustomizableLoader));
+			}
+
+#pragma warning disable CS0618 // Type or member is obsolete
+			return translator.Loader;
+#pragma warning restore CS0618 // Type or member is obsolete
+		}
+	}
+
+	internal class HqlTranslatorWrapper : ITranslatorWithCustomizableLoader
 	{
 		private readonly IQueryTranslator innerTranslator;
 
@@ -814,10 +866,15 @@ namespace NHibernate.Impl
 			innerTranslator = translator;
 		}
 
+		// Since 5.5.
+		[Obsolete("Use QueryLoader instead.")]
 		public Loader.Loader Loader
 		{
 			get { return innerTranslator.Loader; }
 		}
+
+		/// <inheritdoc />
+		public ILoader QueryLoader => innerTranslator.GetQueryLoader();
 
 		public IType[] ReturnTypes
 		{
@@ -835,7 +892,7 @@ namespace NHibernate.Impl
 		}
 	}
 
-	internal class SqlTranslator : ITranslator
+	internal class SqlTranslator : ITranslatorWithCustomizableLoader
 	{
 		private readonly CustomLoader loader;
 
@@ -852,10 +909,15 @@ namespace NHibernate.Impl
 			get { return loader.ResultTypes; }
 		}
 
+		// Since 5.5.
+		[Obsolete("Use QueryLoader instead.")]
 		public Loader.Loader Loader
 		{
 			get { return loader; }
 		}
+
+		/// <inheritdoc />
+		public ILoader QueryLoader => loader;
 
 		public ICollection<string> QuerySpaces
 		{

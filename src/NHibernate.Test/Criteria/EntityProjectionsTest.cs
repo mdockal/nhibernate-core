@@ -1,4 +1,5 @@
-﻿using NHibernate.Cfg.MappingSchema;
+﻿using NHibernate.Cfg;
+using NHibernate.Cfg.MappingSchema;
 using NHibernate.Criterion;
 using NHibernate.Dialect;
 using NHibernate.Mapping.ByCode;
@@ -18,6 +19,11 @@ namespace NHibernate.Test.Criteria
 		private EntityWithCompositeId _entityWithCompositeId;
 		private EntityCustomEntityName _entityWithCustomEntityName;
 
+		protected override void Configure(Configuration configuration)
+		{
+			configuration.SetProperty(Environment.FormatSql, "false");
+		}
+
 		protected override HbmMapping GetMappings()
 		{
 			var mapper = new ModelMapper();
@@ -30,7 +36,17 @@ namespace NHibernate.Test.Criteria
 
 					rc.Property(x => x.Name);
 
-					rc.Property(ep => ep.LazyProp, m => m.Lazy(true));
+					rc.Property(ep => ep.LazyProp, m =>
+					{
+						m.Lazy(true);
+						m.FetchGroup("LazyProp1");
+					});
+
+					rc.Property(ep => ep.LazyProp2, m =>
+					{
+						m.Lazy(true);
+						m.FetchGroup("LazyProp2");
+					});
 
 					rc.ManyToOne(ep => ep.Child1, m => m.Column("Child1Id"));
 					rc.ManyToOne(ep => ep.Child2, m => m.Column("Child2Id"));
@@ -44,7 +60,6 @@ namespace NHibernate.Test.Criteria
 							m.Inverse(true);
 						},
 						a => a.OneToMany());
-
 				});
 
 			mapper.Class<EntitySimpleChild>(
@@ -175,7 +190,6 @@ namespace NHibernate.Test.Criteria
 					.Select(Projections.RootEntity().SetLazy(true))
 					.Take(1).SingleOrDefault();
 
-
 				Assert.That(NHibernateUtil.IsInitialized(entityRoot), Is.False, "Object must be lazy loaded.");
 			}
 		}
@@ -241,12 +255,14 @@ namespace NHibernate.Test.Criteria
 		[Test]
 		public void EntityProjectionLockMode()
 		{
+			// For this test to succeed with SQL Anywhere, ansi_update_constraints must be off.
+			// In I-SQL: set option ansi_update_constraints = 'Off'
 			if (Dialect is Oracle8iDialect)
 				Assert.Ignore("Oracle is not supported due to #1352 bug (NH-3902)");
 
 			var upgradeHint = Dialect.ForUpdateString;
 			if(string.IsNullOrEmpty(upgradeHint))
-				upgradeHint = this.Dialect.AppendLockHint(LockMode.Upgrade, string.Empty);
+				upgradeHint = Dialect.AppendLockHint(LockMode.Upgrade, string.Empty);
 			if (string.IsNullOrEmpty(upgradeHint))
 			{
 				Assert.Ignore($"Upgrade hint is not supported by dialect {Dialect.GetType().Name}");
@@ -306,7 +322,6 @@ namespace NHibernate.Test.Criteria
 				//make sure objects are populated from different aliases for the same types
 				Assert.That(root.Id, Is.Not.EqualTo(sameTypeChild.Id), "Different objects are expected for root and sameTypeChild.");
 				Assert.That(child1.Id, Is.Not.EqualTo(child2.Id), "Different objects are expected for child1 and child2.");
-
 			}
 		}
 
@@ -324,12 +339,33 @@ namespace NHibernate.Test.Criteria
 				Assert.That(entityRoot, Is.Not.Null);
 				Assert.That(NHibernateUtil.IsInitialized(entityRoot), Is.True, "Object must be initialized");
 				Assert.That(NHibernateUtil.IsPropertyInitialized(entityRoot, nameof(entityRoot.LazyProp)), Is.True, "Lazy property must be initialized");
+				Assert.That(NHibernateUtil.IsPropertyInitialized(entityRoot, nameof(entityRoot.LazyProp2)), Is.True, "Lazy property must be initialized");
+			}
+		}
+		
+		[Test]
+		public void EntityProjectionWithLazyPropertiesSinglePropertyFetch()
+		{
+			using (var session = OpenSession())
+			{
+				EntityComplex entityRoot;
+				entityRoot = session
+							.QueryOver<EntityComplex>()
+							.Where(ec => ec.LazyProp != null)
+							.Select(Projections.RootEntity().SetFetchLazyPropertyGroups(nameof(entityRoot.LazyProp)))
+							.Take(1).SingleOrDefault();
+
+				Assert.That(entityRoot, Is.Not.Null);
+				Assert.That(NHibernateUtil.IsInitialized(entityRoot), Is.True, "Object must be initialized");
+				Assert.That(NHibernateUtil.IsPropertyInitialized(entityRoot, nameof(entityRoot.LazyProp)), Is.True, "Lazy property must be initialized");
+				Assert.That(NHibernateUtil.IsPropertyInitialized(entityRoot, nameof(entityRoot.LazyProp2)), Is.False, "Property must be lazy");
 			}
 		}
 
 		[Test]
 		public void NullEntityProjection()
 		{
+#pragma warning disable CS8073 //The result of the expression is always 'false'
 			using (var session = OpenSession())
 			{
 				EntitySimpleChild child1 = null;
@@ -342,6 +378,7 @@ namespace NHibernate.Test.Criteria
 
 				Assert.That(child1, Is.Null);
 			}
+#pragma warning restore CS8073 //The result of the expression is always 'false'
 		}
 
 		[Test]
@@ -436,7 +473,6 @@ namespace NHibernate.Test.Criteria
 			}
 		}
 
-
 		[Test]
 		public void ReadOnlyProjection()
 		{
@@ -468,7 +504,6 @@ namespace NHibernate.Test.Criteria
 				Assert.That(composite, Is.EqualTo(_entityWithCompositeId).Using((EntityWithCompositeId x, EntityWithCompositeId y) => (Equals(x.Key, y.Key) && Equals(x.Name, y.Name)) ? 0 : 1));
 				Assert.That(sqlLog.Appender.GetEvents().Length, Is.EqualTo(1), "Only one SQL select is expected");
 			}
-
 		}
 
 		[Test]

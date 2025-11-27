@@ -5,6 +5,7 @@ using System.Data.Common;
 using System.Linq;
 using NHibernate.Cache;
 using NHibernate.Engine;
+using NHibernate.Loader;
 using NHibernate.SqlCommand;
 using NHibernate.Type;
 using NHibernate.Util;
@@ -14,20 +15,28 @@ namespace NHibernate.Multi
 	/// <summary>
 	/// Base class for both ICriteria and IQuery queries
 	/// </summary>
-	public abstract partial class QueryBatchItemBase<TResult> : IQueryBatchItem<TResult>
+	public abstract partial class QueryBatchItemBase<TResult> : IQueryBatchItem<TResult>, IQueryBatchItemWithAsyncProcessResults
 	{
+		private static readonly INHibernateLogger Log = NHibernateLogger.For(typeof(QueryBatch));
+
 		protected ISessionImplementor Session;
 		private List<EntityKey[]>[] _subselectResultKeys;
 		private List<QueryInfo> _queryInfos;
 		private CacheMode? _cacheMode;
 		private IList<TResult> _finalResults;
+		private DbDataReader _reader;
+		private List<object>[] _hydratedObjects;
 
-		protected class QueryInfo : ICachingInformation
+		protected class QueryInfo : ICachingInformation, ICachingInformationWithFetches
 		{
+			// Since 5.5
+			[Obsolete("Use QueryLoader property instead")]
+			public Loader.Loader Loader => QueryLoader as Loader.Loader ?? throw new NotSupportedException("Custom loader is not supported.");
+
 			/// <summary>
 			/// The query loader.
 			/// </summary>
-			public Loader.Loader Loader { get; set; }
+			public ILoader QueryLoader { get; }
 
 			/// <summary>
 			/// The query result.
@@ -46,7 +55,7 @@ namespace NHibernate.Multi
 			public bool IsCacheable { get; }
 
 			/// <inheritdoc />
-			public QueryKey CacheKey { get;}
+			public QueryKey CacheKey { get; }
 
 			/// <inheritdoc />
 			public bool CanGetFromCache { get; }
@@ -54,10 +63,13 @@ namespace NHibernate.Multi
 			// Do not store but forward instead: Loader.ResultTypes can be null initially (if AutoDiscoverTypes
 			// is enabled).
 			/// <inheritdoc />
-			public IType[] ResultTypes => Loader.ResultTypes;
+			public IType[] ResultTypes => QueryLoader.ResultTypes;
 
 			/// <inheritdoc />
-			public string QueryIdentifier => Loader.QueryIdentifier;
+			public IType[] CacheTypes => QueryLoader.CacheTypes;
+
+			/// <inheritdoc />
+			public string QueryIdentifier => QueryLoader.QueryIdentifier;
 
 			/// <inheritdoc />
 			public IList ResultToCache { get; set; }
@@ -84,19 +96,34 @@ namespace NHibernate.Multi
 			/// <param name="loader">The loader.</param>
 			/// <param name="querySpaces">The query spaces.</param>
 			/// <param name="session">The session of the query.</param>
+			// Since 5.5.
+			[Obsolete("Use overload taking an ILoader instead.")]
 			public QueryInfo(
 				QueryParameters parameters, Loader.Loader loader, ISet<string> querySpaces,
+				ISessionImplementor session) : this(parameters, (ILoader)loader, querySpaces, session)
+			{
+			}
+
+			/// <summary>
+			/// Create a new <c>QueryInfo</c>.
+			/// </summary>
+			/// <param name="parameters">The query parameters.</param>
+			/// <param name="loader">The loader.</param>
+			/// <param name="querySpaces">The query spaces.</param>
+			/// <param name="session">The session of the query.</param>
+			public QueryInfo(
+				QueryParameters parameters, ILoader loader, ISet<string> querySpaces,
 				ISessionImplementor session)
 			{
 				Parameters = parameters;
-				Loader = loader;
+				QueryLoader = loader;
 				QuerySpaces = querySpaces;
 
 				IsCacheable = loader.IsCacheable(parameters);
 				if (!IsCacheable)
 					return;
 
-				CacheKey = Loader.GenerateQueryKey(session, Parameters);
+				CacheKey = QueryLoader.GenerateQueryKey(session, Parameters);
 				CanGetFromCache = Parameters.CanGetFromCache(session);
 				CanPutToCache = Parameters.CanPutToCache(session);
 			}
@@ -162,7 +189,7 @@ namespace NHibernate.Multi
 				if (qi.IsResultFromCache)
 					continue;
 
-				yield return qi.Loader.CreateSqlCommand(qi.Parameters, Session);
+				yield return qi.QueryLoader.CreateSqlCommand(qi.Parameters, Session);
 			}
 		}
 
@@ -173,6 +200,7 @@ namespace NHibernate.Multi
 
 			var dialect = Session.Factory.Dialect;
 			var hydratedObjects = new List<object>[_queryInfos.Count];
+			var isDebugLog = Log.IsDebugEnabled();
 
 			using (Session.SwitchCacheMode(_cacheMode))
 			{
@@ -180,7 +208,7 @@ namespace NHibernate.Multi
 				for (var i = 0; i < _queryInfos.Count; i++)
 				{
 					var queryInfo = _queryInfos[i];
-					var loader = queryInfo.Loader;
+					var loader = queryInfo.QueryLoader;
 					var queryParameters = queryInfo.Parameters;
 
 					//Skip processing for items already loaded from cache
@@ -214,9 +242,21 @@ namespace NHibernate.Multi
 					var lockModeArray = loader.GetLockModes(queryParameters.LockModes);
 					var optionalObjectKey = Loader.Loader.GetOptionalObjectKey(queryParameters, Session);
 					var tmpResults = new List<object>();
+					var queryCacheBuilder = queryInfo.IsCacheable ? new QueryCacheResultBuilder(loader) : null;
+					var cacheBatcher = queryInfo.CacheBatcher;
+					var ownCacheBatcher = cacheBatcher == null;
+					if (ownCacheBatcher)
+						cacheBatcher = new CacheBatcher(Session);
 
-					for (var count = 0; count < maxRows && reader.Read(); count++)
+					if (isDebugLog)
+						Log.Debug("processing result set");
+
+					int count;
+					for (count = 0; count < maxRows && reader.Read(); count++)
 					{
+						if (isDebugLog)
+							Log.Debug("result set row: {0}", count);
+
 						rowCount++;
 
 						var o =
@@ -229,7 +269,9 @@ namespace NHibernate.Multi
 								hydratedObjects[i],
 								keys,
 								true,
-								forcedResultTransformer
+								forcedResultTransformer,
+								queryCacheBuilder,
+								(persister, data) => cacheBatcher.AddToBatch(persister, data)
 							);
 						if (loader.IsSubselectLoadingEnabled)
 						{
@@ -240,37 +282,53 @@ namespace NHibernate.Multi
 						tmpResults.Add(o);
 					}
 
+					if (isDebugLog)
+						Log.Debug("done processing result set ({0} rows)", count);
+
 					queryInfo.Result = tmpResults;
 					if (queryInfo.CanPutToCache)
-						queryInfo.ResultToCache = tmpResults;
+						queryInfo.ResultToCache = queryCacheBuilder.Result;
+
+					if (ownCacheBatcher)
+						cacheBatcher.ExecuteBatch();
 
 					reader.NextResult();
 				}
 
-				InitializeEntitiesAndCollections(reader, hydratedObjects);
-
+				StopLoadingCollections(reader);
+				_reader = reader;
+				_hydratedObjects = hydratedObjects;
 				return rowCount;
 			}
 		}
 
-		/// <inheritdoc />
+		/// <inheritdoc cref="IQueryBatchItem.ProcessResults" />
 		public void ProcessResults()
 		{
 			ThrowIfNotInitialized();
+
+			using (Session.SwitchCacheMode(_cacheMode))
+				InitializeEntitiesAndCollections(_reader, _hydratedObjects);
 
 			for (var i = 0; i < _queryInfos.Count; i++)
 			{
 				var queryInfo = _queryInfos[i];
 				if (_subselectResultKeys[i] != null)
 				{
-					queryInfo.Loader.CreateSubselects(_subselectResultKeys[i], queryInfo.Parameters, Session);
+					queryInfo.QueryLoader.CreateSubselects(_subselectResultKeys[i], queryInfo.Parameters, Session);
 				}
 
 				if (queryInfo.IsCacheable)
 				{
+					if (queryInfo.IsResultFromCache)
+					{
+						var queryCacheBuilder = new QueryCacheResultBuilder(queryInfo.QueryLoader);
+						queryInfo.Result = queryCacheBuilder.GetResultList(queryInfo.Result);
+					}
+
 					// This transformation must not be applied to ResultToCache.
 					queryInfo.Result =
-						queryInfo.Loader.TransformCacheableResults(
+						queryInfo.QueryLoader.TransformCacheableResults(
 							queryInfo.Parameters, queryInfo.CacheKey.ResultTransformer, queryInfo.Result);
 				}
 			}
@@ -296,7 +354,7 @@ namespace NHibernate.Multi
 			var results = new List<T>(_queryInfos.Sum(qi => qi.Result.Count));
 			foreach (var queryInfo in _queryInfos)
 			{
-				var list = queryInfo.Loader.GetResultList(
+				var list = queryInfo.QueryLoader.GetResultList(
 					queryInfo.Result,
 					queryInfo.Parameters.ResultTransformer);
 				ArrayHelper.AddAll(results, list);
@@ -323,9 +381,20 @@ namespace NHibernate.Multi
 				var queryInfo = _queryInfos[i];
 				if (queryInfo.IsResultFromCache)
 					continue;
-				queryInfo.Loader.InitializeEntitiesAndCollections(
+				queryInfo.QueryLoader.InitializeEntitiesAndCollections(
 					hydratedObjects[i], reader, Session, queryInfo.Parameters.IsReadOnly(Session),
 					queryInfo.CacheBatcher);
+			}
+		}
+
+		private void StopLoadingCollections(DbDataReader reader)
+		{
+			for (var i = 0; i < _queryInfos.Count; i++)
+			{
+				var queryInfo = _queryInfos[i];
+				if (queryInfo.IsResultFromCache)
+					continue;
+				queryInfo.QueryLoader.StopLoadingCollections(Session, reader);
 			}
 		}
 

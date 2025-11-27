@@ -16,8 +16,14 @@ namespace NHibernate.Proxy
 		private static readonly PropertyInfo AccessorTypeFieldInterceptorProperty =
 			FieldInterceptorAccessorType.GetProperty(nameof(IFieldInterceptorAccessor.FieldInterceptor));
 		private static readonly System.Type FieldInterceptorType = typeof(IFieldInterceptor);
+		// 6.0 TODO: Remove
+		private static readonly System.Type FieldInterceptorExtensionsType = typeof(FieldInterceptorExtensions);
+#pragma warning disable 618
 		private static readonly MethodInfo FieldInterceptorInterceptMethod = FieldInterceptorType.GetMethod(nameof(IFieldInterceptor.Intercept));
+#pragma warning restore 618
 		private static readonly MethodInfo FieldInterceptorMarkDirtyMethod = FieldInterceptorType.GetMethod(nameof(IFieldInterceptor.MarkDirty));
+		// 6.0 TODO: Remove and replace usages with FieldInterceptorInterceptMethod
+		private static readonly MethodInfo FieldInterceptorInterceptExtensionMethod = FieldInterceptorExtensionsType.GetMethod(nameof(FieldInterceptorExtensions.Intercept));
 		private static readonly System.Type AbstractFieldInterceptorType = typeof(AbstractFieldInterceptor);
 		private static readonly FieldInfo AbstractFieldInterceptorInvokeImplementationField =
 			AbstractFieldInterceptorType.GetField(nameof(AbstractFieldInterceptor.InvokeImplementation));
@@ -50,6 +56,10 @@ namespace NHibernate.Proxy
 			var name = new AssemblyName(assemblyName);
 
 			var assemblyBuilder = ProxyBuilderHelper.DefineDynamicAssembly(AppDomain.CurrentDomain, name);
+
+			if (!baseType.IsVisible)
+				ProxyBuilderHelper.GenerateInstanceOfIgnoresAccessChecksToAttribute(assemblyBuilder, baseType.Assembly.GetName().Name);
+
 			var moduleBuilder = ProxyBuilderHelper.DefineDynamicModule(assemblyBuilder, moduleName);
 
 			const TypeAttributes typeAttributes = TypeAttributes.AutoClass | TypeAttributes.Class | TypeAttributes.Public | TypeAttributes.BeforeFieldInit;
@@ -83,11 +93,11 @@ namespace NHibernate.Proxy
 
 		private static void CreateProxiedMethod(TypeBuilder typeBuilder, MethodInfo method, FieldInfo fieldInterceptorField)
 		{
-			if (ReflectHelper.IsPropertyGet(method))
+			if (ReflectHelper.IsPropertyGet(method) && method.GetParameters().Length == 0)
 			{
 				ImplementGet(typeBuilder, method, fieldInterceptorField);
 			}
-			else if (ReflectHelper.IsPropertySet(method))
+			else if (ReflectHelper.IsPropertySet(method) && method.GetParameters().Length == 1)
 			{
 				ImplementSet(typeBuilder, method, fieldInterceptorField);
 			}
@@ -367,7 +377,7 @@ namespace NHibernate.Proxy
 				if (this.__fieldInterceptor != null)
 				{
 					this.__fieldInterceptor.MarkDirty();
-					this.__fieldInterceptor.Intercept(this, <ReflectHelper.GetPropertyName(setter)>, value);
+					this.__fieldInterceptor.Intercept(this, <ReflectHelper.GetPropertyName(setter)>, value, true);
 				}
 				base.<setter>(value);
 			 */
@@ -387,7 +397,7 @@ namespace NHibernate.Proxy
 			IL.Emit(OpCodes.Ldfld, fieldInterceptorField);
 			IL.Emit(OpCodes.Callvirt, FieldInterceptorMarkDirtyMethod);
 
-			// this.__fieldInterceptor.Intercept(this, <ReflectHelper.GetPropertyName(setter)>, propValue);
+			// this.__fieldInterceptor.Intercept(this, <ReflectHelper.GetPropertyName(setter)>, propValue, true);
 			IL.Emit(OpCodes.Ldarg_0);
 			IL.Emit(OpCodes.Ldfld, fieldInterceptorField);
 			IL.Emit(OpCodes.Ldarg_0);
@@ -396,7 +406,8 @@ namespace NHibernate.Proxy
 			var propertyType = setter.GetParameters()[0].ParameterType;
 			if (propertyType.IsValueType)
 				IL.Emit(OpCodes.Box, propertyType);
-			IL.Emit(OpCodes.Callvirt, FieldInterceptorInterceptMethod);
+			IL.Emit(OpCodes.Ldc_I4_1);
+			IL.EmitCall(OpCodes.Call, FieldInterceptorInterceptExtensionMethod, null);
 			IL.Emit(OpCodes.Pop);
 
 			// end if (this.__fieldInterceptor != null)
